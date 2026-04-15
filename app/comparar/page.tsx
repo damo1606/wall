@@ -149,7 +149,7 @@ export default function CompararPage() {
                     <th key={s.symbol} className="px-4 py-3 text-center">
                       <Link href={`/empresa/${s.symbol}`} className="hover:text-blue-400 transition-colors">
                         <div className="text-white font-black text-base">{s.symbol}</div>
-                        <div className="text-gray-500 text-xs font-normal truncate max-w-[120px] mx-auto">{s.shortName}</div>
+                        <div className="text-gray-500 text-xs font-normal truncate max-w-[120px] mx-auto">{s.company}</div>
                       </Link>
                     </th>
                   ))}
