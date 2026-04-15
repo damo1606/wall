@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Metodologia1 from "@/components/Metodologia1";
 import Metodologia2 from "@/components/Metodologia2";
 import Metodologia3 from "@/components/Metodologia3";
@@ -62,11 +63,14 @@ const METHODOLOGY_INTROS: Record<Tab, { what: string; how: string; output: strin
 
 interface SearchResult { symbol: string; name: string; exchange: string; type: string; }
 
-export default function Home() {
+function GexContent() {
+  const searchParams = useSearchParams();
+  const urlTicker = searchParams.get("ticker")?.toUpperCase() ?? "";
+
   const [activeTab, setActiveTab] = useState<Tab>("METODOLOGÍA 1");
-  const [ticker, setTicker] = useState("SPY");
+  const [ticker, setTicker] = useState(urlTicker || "SPY");
   const [companyName, setCompanyName] = useState("");
-  const [query, setQuery] = useState("SPY");
+  const [query, setQuery] = useState(urlTicker || "SPY");
   const [suggestions, setSuggestions] = useState<SearchResult[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [expiration, setExpiration] = useState("");
@@ -124,6 +128,16 @@ export default function Home() {
     setLoadingExps(false);
     setAnalyzeKey((k) => k + 1);
   }
+
+  // Auto-analyze when ticker comes from URL param
+  const autoAnalyzed = useRef(false);
+  useEffect(() => {
+    if (urlTicker && !autoAnalyzed.current) {
+      autoAnalyzed.current = true;
+      handleAnalyze();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [introOpen, setIntroOpen] = useState(false);
 
@@ -301,5 +315,13 @@ export default function Home() {
         <Metodologia7 ticker={ticker} expiration={expiration} analyzeKey={analyzeKey} companyName={companyName} />
       </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense>
+      <GexContent />
+    </Suspense>
   );
 }

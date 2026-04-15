@@ -1,6 +1,7 @@
 "use client"
 
 import { useParams } from "next/navigation"
+import Link from "next/link"
 import { useEffect, useState } from "react"
 import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
@@ -176,6 +177,12 @@ export default function EmpresaPage() {
             className="text-sm px-4 py-1.5 rounded-lg border border-gray-700 text-gray-400 hover:border-orange-700 hover:text-orange-300 font-medium transition-colors">
             ＋ Alerta
           </button>
+          <Link
+            href={`/gex?ticker=${symbol}`}
+            className="text-sm px-4 py-1.5 rounded-lg bg-emerald-800 text-emerald-200 hover:bg-emerald-700 font-medium transition-colors"
+          >
+            Ver Opciones →
+          </Link>
           {actionDone && (
             <span className="text-sm text-green-400 px-3 py-1.5">{actionDone}</span>
           )}
