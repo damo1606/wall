@@ -112,38 +112,44 @@ function GexContent() {
     setShowSuggestions(false);
   }
 
-  async function handleAnalyze() {
-    if (!ticker.trim()) return;
+  async function handleAnalyze(overrideTicker?: string) {
+    const t = (overrideTicker ?? ticker).trim();
+    if (!t) return;
     setLoadingExps(true);
     try {
-      const res = await fetch(`/api/expirations?ticker=${ticker}`);
+      const res = await fetch(`/api/expirations?ticker=${t}`);
       const json = await res.json();
       if (res.ok && json.expirations?.length > 0) {
         setExpirations(json.expirations);
         const newExp = (!expiration || !json.expirations.includes(expiration)) ? json.expirations[0] : expiration;
         setExpiration(newExp);
-        try { localStorage.setItem("wall_gex_last", JSON.stringify({ ticker, expiration: newExp })); } catch {}
+        try { localStorage.setItem("wall_gex_last", JSON.stringify({ ticker: t, expiration: newExp })); } catch {}
       }
     } catch {}
     setLoadingExps(false);
     setAnalyzeKey((k) => k + 1);
   }
 
-  // Auto-analyze when ticker comes from URL; pre-fill from localStorage otherwise
+  // Auto-analyze al montar: URL ticker > localStorage > SPY por defecto
   const autoAnalyzed = useRef(false);
   useEffect(() => {
-    if (urlTicker && !autoAnalyzed.current) {
-      autoAnalyzed.current = true;
-      handleAnalyze();
-    } else if (!urlTicker) {
+    if (autoAnalyzed.current) return;
+    autoAnalyzed.current = true;
+    if (urlTicker) {
+      handleAnalyze(urlTicker);
+    } else {
       try {
         const saved = JSON.parse(localStorage.getItem("wall_gex_last") ?? "null");
         if (saved?.ticker) {
           setTicker(saved.ticker);
           setQuery(saved.ticker);
           if (saved.expiration) setExpiration(saved.expiration);
+          handleAnalyze(saved.ticker);
+          return;
         }
       } catch {}
+      // Sin URL ni localStorage → SPY por defecto
+      handleAnalyze("SPY");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
