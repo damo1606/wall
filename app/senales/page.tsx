@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS } from "@/lib/symbols"
 import type { StockData } from "@/lib/yahoo"
@@ -124,6 +124,16 @@ export default function SenalesPage() {
   const [sortBy, setSortBy]     = useState<SortCol>("final")
   const [sortDir, setSortDir]   = useState<"asc" | "desc">("desc")
 
+  type HistoryEntry = { date: string; universe: string; compras: number; ventas: number }
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("wall_signals_history") ?? "[]")
+      if (Array.isArray(saved)) setHistory(saved)
+    } catch {}
+  }, [])
+
   function handleSort(col: SortCol) {
     if (sortBy === col) setSortDir(d => d === "desc" ? "asc" : "desc")
     else { setSortBy(col); setSortDir("desc") }
@@ -188,6 +198,22 @@ export default function SenalesPage() {
     setStocks(results)
     setLoading(false)
     setRan(true)
+
+    // Guardar en historial (máx 5 entradas)
+    try {
+      const compras = results.filter(s => s.brain.finalSignal === "Compra Fuerte" || s.brain.finalSignal === "Compra").length
+      const ventas  = results.filter(s => s.brain.finalSignal === "Venta" || s.brain.finalSignal === "Venta Fuerte").length
+      const entry: HistoryEntry = {
+        date: new Date().toLocaleDateString("es-ES", { day: "numeric", month: "short" }),
+        universe: universe === "dia" ? "DJIA" : universe === "sp500" ? "S&P" : universe === "nasdaq" ? "NDQ" : "RUS",
+        compras,
+        ventas,
+      }
+      const prev = JSON.parse(localStorage.getItem("wall_signals_history") ?? "[]") as HistoryEntry[]
+      const next = [entry, ...prev].slice(0, 5)
+      localStorage.setItem("wall_signals_history", JSON.stringify(next))
+      setHistory(next)
+    } catch {}
   }
 
   // Agrupar por señal del cerebro (finalSignal)
@@ -222,6 +248,18 @@ export default function SenalesPage() {
           <p className="text-gray-400 mt-1">
             Clasificación automática por calidad del negocio × atractivo del precio
           </p>
+          {history.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {history.map((h, i) => (
+                <span
+                  key={i}
+                  className="text-xs px-2.5 py-1 rounded-full bg-gray-800 border border-gray-700 text-gray-400 font-mono"
+                >
+                  {h.date} · {h.universe} · <span className="text-green-400">▲{h.compras}</span> <span className="text-red-400">▼{h.ventas}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Controles */}

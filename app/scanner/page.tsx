@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 
 type Bias = "BULLISH" | "BEARISH" | "NEUTRAL";
 
@@ -321,7 +322,9 @@ export default function ScannerPage() {
                     key={`${r.ticker}-${r.strike}-${r.type}-${i}`}
                     className="border-b border-border hover:bg-surface transition-colors"
                   >
-                    <td className="px-3 py-2 font-bold text-accent tracking-widest">{r.ticker}</td>
+                    <td className="px-3 py-2 font-bold tracking-widest">
+                      <Link href={`/empresa/${r.ticker}`} className="text-accent hover:underline">{r.ticker}</Link>
+                    </td>
                     <td className="px-3 py-2 font-mono">
                       {(() => {
                         const live = livePrices[r.ticker];

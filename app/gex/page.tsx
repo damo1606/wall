@@ -67,7 +67,7 @@ function GexContent() {
   const searchParams = useSearchParams();
   const urlTicker = searchParams.get("ticker")?.toUpperCase() ?? "";
 
-  const [activeTab, setActiveTab] = useState<Tab>("METODOLOGÍA 1");
+  const [activeTab, setActiveTab] = useState<Tab>(urlTicker ? "METODOLOGÍA 7" : "METODOLOGÍA 1");
   const [ticker, setTicker] = useState(urlTicker || "SPY");
   const [companyName, setCompanyName] = useState("");
   const [query, setQuery] = useState(urlTicker || "SPY");
@@ -120,21 +120,30 @@ function GexContent() {
       const json = await res.json();
       if (res.ok && json.expirations?.length > 0) {
         setExpirations(json.expirations);
-        if (!expiration || !json.expirations.includes(expiration)) {
-          setExpiration(json.expirations[0]);
-        }
+        const newExp = (!expiration || !json.expirations.includes(expiration)) ? json.expirations[0] : expiration;
+        setExpiration(newExp);
+        try { localStorage.setItem("wall_gex_last", JSON.stringify({ ticker, expiration: newExp })); } catch {}
       }
     } catch {}
     setLoadingExps(false);
     setAnalyzeKey((k) => k + 1);
   }
 
-  // Auto-analyze when ticker comes from URL param
+  // Auto-analyze when ticker comes from URL; pre-fill from localStorage otherwise
   const autoAnalyzed = useRef(false);
   useEffect(() => {
     if (urlTicker && !autoAnalyzed.current) {
       autoAnalyzed.current = true;
       handleAnalyze();
+    } else if (!urlTicker) {
+      try {
+        const saved = JSON.parse(localStorage.getItem("wall_gex_last") ?? "null");
+        if (saved?.ticker) {
+          setTicker(saved.ticker);
+          setQuery(saved.ticker);
+          if (saved.expiration) setExpiration(saved.expiration);
+        }
+      } catch {}
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
