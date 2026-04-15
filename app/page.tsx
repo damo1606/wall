@@ -280,6 +280,48 @@ export default function Home() {
           </div>
         )}
 
+        {/* Top 5 Oportunidades */}
+        {stocks.length > 0 && (() => {
+          const top5 = stocks
+            .filter(s => s.score.signal === "Compra Fuerte" || s.score.signal === "Compra")
+            .sort((a, b) => b.score.finalScore - a.score.finalScore)
+            .slice(0, 5)
+          if (top5.length === 0) return null
+          return (
+            <div className="mb-6">
+              <div className="text-xs text-gray-500 tracking-widest font-bold mb-3">TOP OPORTUNIDADES</div>
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {top5.map(s => (
+                  <Link
+                    key={s.symbol}
+                    href={`/empresa/${s.symbol}`}
+                    className="shrink-0 w-44 bg-gray-900 border border-gray-700 rounded-xl p-4 hover:border-blue-500 transition-colors"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-white font-black text-sm">{s.symbol}</span>
+                      <GradeBadge grade={s.score.grade} />
+                    </div>
+                    <div className="text-white font-mono font-bold">
+                      ${s.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className={`text-xs font-mono mt-1 ${s.discountToGraham <= -10 ? "text-green-400" : s.discountToGraham >= 0 ? "text-red-400" : "text-yellow-300"}`}>
+                      Graham: {s.discountToGraham >= 0 ? "+" : ""}{s.discountToGraham.toFixed(1)}%
+                    </div>
+                    <div className={`text-xs font-mono mt-0.5 ${s.upsideToTarget >= 20 ? "text-green-400" : s.upsideToTarget >= 0 ? "text-yellow-300" : "text-red-400"}`}>
+                      Upside: {pct(s.upsideToTarget)}
+                    </div>
+                    <div className="mt-2">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${s.score.signal === "Compra Fuerte" ? "bg-emerald-500 text-white" : "bg-green-600 text-white"}`}>
+                        {s.score.signal === "Compra Fuerte" ? "▲▲" : "▲"} {s.score.signal}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Tabla */}
         {stocks.length > 0 && (() => {
           const filtered = filterByCycle && phase

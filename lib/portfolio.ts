@@ -27,12 +27,13 @@ export type WatchEntry = {
 }
 
 export type AlertType =
-  | "price_below"  // currentPrice <= threshold
-  | "price_above"  // currentPrice >= threshold
-  | "buy_ready"    // score.buyReady === true  (threshold ignorado)
-  | "grade_min"    // GRADE_ORDER.indexOf(grade) >= threshold (0=F … 5=A+)
-  | "drop_pct"     // dropFrom52w <= -threshold
-  | "upside_pct"   // upsideToTarget >= threshold
+  | "price_below"      // currentPrice <= threshold
+  | "price_above"      // currentPrice >= threshold
+  | "buy_ready"        // score.buyReady === true  (threshold ignorado)
+  | "grade_min"        // GRADE_ORDER.indexOf(grade) >= threshold (0=F … 5=A+)
+  | "drop_pct"         // dropFrom52w <= -threshold
+  | "upside_pct"       // upsideToTarget >= threshold
+  | "graham_discount"  // discountToGraham <= -threshold (precio X% bajo Graham Number)
 
 export type Alert = {
   id: string
@@ -53,6 +54,7 @@ export type AlertCheckInput = {
   upsideToTarget: number
   grade: string
   buyReady: boolean
+  discountToGraham?: number
 }
 
 // ─── Helpers de lectura / escritura ──────────────────────────────────────────
@@ -163,7 +165,8 @@ export function checkAlerts(
       case "buy_ready":    fires = d.buyReady; break
       case "grade_min":    fires = GRADE_ORDER.indexOf(d.grade) >= a.threshold; break
       case "drop_pct":     fires = d.dropFrom52w <= -Math.abs(a.threshold); break
-      case "upside_pct":   fires = d.upsideToTarget >= a.threshold; break
+      case "upside_pct":     fires = d.upsideToTarget >= a.threshold; break
+      case "graham_discount": fires = d.discountToGraham !== undefined && d.discountToGraham <= -Math.abs(a.threshold); break
     }
     if (fires) triggered.push(a.id)
   }
@@ -179,7 +182,8 @@ export function alertTypeLabel(type: AlertType): string {
     case "buy_ready":    return "Buy Ready activado"
     case "grade_min":    return "Grado mínimo"
     case "drop_pct":     return "Caída desde máximos ≥"
-    case "upside_pct":   return "Upside analistas ≥"
+    case "upside_pct":      return "Upside analistas ≥"
+    case "graham_discount": return "Descuento vs Graham ≥"
   }
 }
 
@@ -190,7 +194,8 @@ export function alertThresholdSuffix(type: AlertType): string {
     case "buy_ready":    return ""
     case "grade_min":    return " (grado)"
     case "drop_pct":
-    case "upside_pct":   return "%"
+    case "upside_pct":
+    case "graham_discount": return "%"
   }
 }
 
