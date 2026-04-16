@@ -57,11 +57,25 @@ function MetricRow({ label, value, good }: { label: string; value: string; good?
 
 // ─── Gráfica de precio histórico ────────────────────────────────────────────
 
+type ChartRange = "1mo" | "3mo" | "6mo" | "1y"
+
+function calcMA(candles: { close: number; time: string }[], period: number) {
+  return candles
+    .map((c, i) => {
+      if (i < period - 1) return null
+      const val = candles.slice(i - period + 1, i + 1).reduce((s, x) => s + x.close, 0) / period
+      return { time: c.time, value: parseFloat(val.toFixed(2)) }
+    })
+    .filter(Boolean) as { time: string; value: number }[]
+}
+
 function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: number }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef     = useRef<any>(null)
   const seriesRef    = useRef<any>(null)
-  const [range,   setRange]   = useState<"1mo" | "3mo" | "6mo">("3mo")
+  const ma50Ref      = useRef<any>(null)
+  const ma200Ref     = useRef<any>(null)
+  const [range,   setRange]   = useState<ChartRange>("3mo")
   const [loading, setLoading] = useState(true)
   const [ready,   setReady]   = useState(false)
 
@@ -88,11 +102,17 @@ function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: nu
       if (grahamNumber > 0) {
         series.createPriceLine({
           price: grahamNumber, color: "#6ee7b7", lineWidth: 1,
-          lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "Graham #",
+          lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "Graham",
         })
       }
-      chartRef.current = chart
+      const ma50  = chart.addLineSeries({ color: "#f59e0b", lineWidth: 1, priceLineVisible: false, crosshairMarkerVisible: false })
+      const ma200 = chart.addLineSeries({ color: "#8b5cf6", lineWidth: 1, priceLineVisible: false, crosshairMarkerVisible: false })
+
+      chartRef.current  = chart
       seriesRef.current = series
+      ma50Ref.current   = ma50
+      ma200Ref.current  = ma200
+
       observer = new ResizeObserver(() => {
         if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth })
       })
@@ -104,8 +124,8 @@ function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: nu
       removed = true
       observer?.disconnect()
       chartRef.current?.remove()
-      chartRef.current = null
-      seriesRef.current = null
+      chartRef.current = null; seriesRef.current = null
+      ma50Ref.current  = null; ma200Ref.current  = null
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -117,7 +137,10 @@ function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: nu
       .then(r => r.ok ? r.json() : null)
       .then(json => {
         if (cancelled || !json?.candles || !seriesRef.current) return
-        seriesRef.current.setData(json.candles)
+        const candles: { time: string; open: number; high: number; low: number; close: number }[] = json.candles
+        seriesRef.current.setData(candles)
+        ma50Ref.current?.setData(calcMA(candles, 50))
+        ma200Ref.current?.setData(calcMA(candles, 200))
         chartRef.current?.timeScale().fitContent()
         setLoading(false)
       })
@@ -128,12 +151,19 @@ function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: nu
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Precio Histórico</h2>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Precio Histórico</h2>
+          <div className="flex items-center gap-2 text-[10px] font-bold">
+            <span className="text-amber-400">── MA50</span>
+            <span className="text-violet-400">── MA200</span>
+            {grahamNumber > 0 && <span className="text-emerald-400">-- Graham</span>}
+          </div>
+        </div>
         <div className="flex gap-1">
-          {(["1mo", "3mo", "6mo"] as const).map(r => (
+          {(["1mo", "3mo", "6mo", "1y"] as const).map(r => (
             <button key={r} onClick={() => setRange(r)}
               className={`text-xs px-2.5 py-1 rounded transition-colors ${range === r ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-300"}`}>
-              {r === "1mo" ? "1M" : r === "3mo" ? "3M" : "6M"}
+              {r === "1mo" ? "1M" : r === "3mo" ? "3M" : r === "6mo" ? "6M" : "1A"}
             </button>
           ))}
         </div>
@@ -162,6 +192,7 @@ export default function EmpresaPage() {
   const [inWatch, setInWatch]         = useState(false)
   const [actionDone, setActionDone]   = useState<string | null>(null)
   const [fetchedAt,  setFetchedAt]    = useState<string | null>(null)
+  const [news,       setNews]         = useState<{ title: string; publisher: string; link: string; publishedAt: string }[]>([])
 
   useEffect(() => {
     setInPortfolio(getPortfolio().some(e => e.symbol === symbol))
@@ -172,6 +203,12 @@ export default function EmpresaPage() {
     const controller = new AbortController()
     setLoading(true)
     setError(false)
+    // Fetch noticias en paralelo (no bloquea la carga principal)
+    fetch(`/api/news/${symbol}`, { signal: controller.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.items) setNews(d.items) })
+      .catch(() => {})
+
     Promise.all([
       fetch(`/api/stock/${symbol}`, { signal: controller.signal }).then(r => r.ok ? r.json() : Promise.reject()),
       fetch("/api/macro", { signal: controller.signal }).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -241,10 +278,24 @@ export default function EmpresaPage() {
                   </span>
                 </div>
               )}
+              {data.earningsDate && (() => {
+                const days = Math.round((new Date(data.earningsDate).getTime() - Date.now()) / 86400000)
+                if (days >= -7 && days <= 45) return (
+                  <div className={`inline-flex items-center gap-1.5 text-xs font-bold mt-1.5 px-2 py-0.5 rounded ${
+                    days <= 7 ? "bg-amber-900/60 text-amber-300 border border-amber-700/50" :
+                    "bg-gray-800 text-gray-400 border border-gray-700"
+                  }`}>
+                    {days < 0 ? `📋 Reportó hace ${Math.abs(days)} días` :
+                     days === 0 ? "📋 Earnings HOY" :
+                     `📋 Earnings en ${days} días — ${data.earningsDate}`}
+                  </div>
+                )
+                return null
+              })()}
               {fetchedAt && (() => {
                 const mins = Math.round((Date.now() - new Date(fetchedAt).getTime()) / 60000)
                 return (
-                  <div className={`text-xs mt-1.5 ${mins > 10 ? "text-amber-400 font-semibold" : "text-gray-700"}`}>
+                  <div className={`text-xs mt-1 ${mins > 10 ? "text-amber-400 font-semibold" : "text-gray-700"}`}>
                     {mins > 10 ? "⚠ " : ""}Datos de hace {mins} min
                   </div>
                 )
@@ -510,6 +561,33 @@ export default function EmpresaPage() {
             </>}
           </div>
         </div>
+
+        {/* Noticias */}
+        {news.length > 0 && (
+          <div className="mt-6 bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Noticias recientes</h2>
+            <div className="space-y-3">
+              {news.map((n, i) => {
+                const mins = Math.round((Date.now() - new Date(n.publishedAt).getTime()) / 60000)
+                const age  = mins < 60 ? `hace ${mins}m` :
+                             mins < 1440 ? `hace ${Math.round(mins / 60)}h` :
+                             `hace ${Math.round(mins / 1440)}d`
+                return (
+                  <a key={i} href={n.link} target="_blank" rel="noopener noreferrer"
+                    className="flex items-start gap-3 group hover:bg-gray-800/50 rounded-lg p-2 -mx-2 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-gray-200 group-hover:text-white transition-colors leading-snug line-clamp-2">
+                        {n.title}
+                      </div>
+                      <div className="text-xs text-gray-600 mt-0.5">{n.publisher} · {age}</div>
+                    </div>
+                    <div className="text-gray-600 group-hover:text-gray-400 transition-colors shrink-0 text-sm">→</div>
+                  </a>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
       </div>
     </main>

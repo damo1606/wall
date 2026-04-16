@@ -176,10 +176,13 @@ export type StockData = {
   valueScore: number
   qualityScore: number
   compositeScore: number
+
+  // Calendario
+  earningsDate?: string   // "2026-04-30" — próxima fecha de earnings (puede ser undefined)
 }
 
 function buildUrl(symbol: string, crumb: string) {
-  return `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,summaryDetail,financialData,defaultKeyStatistics,assetProfile&crumb=${encodeURIComponent(crumb)}`
+  return `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,summaryDetail,financialData,defaultKeyStatistics,assetProfile,calendarEvents&crumb=${encodeURIComponent(crumb)}`
 }
 
 export async function fetchStockData(symbol: string): Promise<StockData | null> {
@@ -274,6 +277,7 @@ export async function fetchStockData(symbol: string): Promise<StockData | null> 
     const stats     = r.defaultKeyStatistics ?? {}
     const financial = r.financialData       ?? {}
     const price     = r.price               ?? {}
+    const calendar  = r.calendarEvents      ?? {}
 
     const currentPrice = financial.currentPrice?.raw   ?? summary.regularMarketPrice?.raw ?? 0
     const high52w      = summary.fiftyTwoWeekHigh?.raw ?? 0
@@ -444,6 +448,12 @@ export async function fetchStockData(symbol: string): Promise<StockData | null> 
       valueScore:     Math.round(valueScore),
       qualityScore:   Math.round(qualityScore),
       compositeScore,
+
+      earningsDate: (() => {
+        const dates: { raw?: number; fmt?: string }[] = calendar.earnings?.earningsDate ?? []
+        const next = dates.find(d => d.raw && d.raw * 1000 > Date.now())
+        return next?.fmt ?? dates[0]?.fmt ?? undefined
+      })(),
     }
   } catch {
     return null
