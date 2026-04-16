@@ -11,5 +11,5 @@ export async function GET(
     return Response.json({ error: "Stock not found" }, { status: 404 })
   }
 
-  return Response.json(data)
+  return Response.json({ ...data, fetchedAt: new Date().toISOString() })
 }

@@ -35,7 +35,8 @@ interface AnomalyRow {
 
 // ─── Constantes ──────────────────────────────────────────────────────────────
 
-const SCAN_TICKERS = "SPY,QQQ,IWM,AAPL,TSLA,NVDA,MSFT,META,AMZN,GOOGL"
+const DEFAULT_SCAN_TICKERS = "SPY,QQQ,IWM,AAPL,TSLA,NVDA,MSFT,META,AMZN,GOOGL"
+const LS_SCAN_KEY = "wall_dashboard_tickers"
 const OPP_TICKERS  = ["AAPL","MSFT","GOOGL","AMZN","NVDA","META","JPM","JNJ","V","WMT","HD","KO","XOM","UNH","TSLA"]
 
 const PHASE_CFG: Record<Phase, { label: string; badge: string; icon: string }> = {
@@ -72,12 +73,15 @@ function Skeleton({ w = "w-full", h = "h-4" }: { w?: string; h?: string }) {
 // ─── Página ──────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const [macro,      setMacro]      = useState<MacroData | null>(null)
-  const [gex,        setGex]        = useState<GexData | null>(null)
-  const [opps,       setOpps]       = useState<Scored[]>([])
-  const [anomalies,  setAnomalies]  = useState<AnomalyRow[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [updatedAt,  setUpdatedAt]  = useState("")
+  const [macro,        setMacro]        = useState<MacroData | null>(null)
+  const [gex,          setGex]          = useState<GexData | null>(null)
+  const [opps,         setOpps]         = useState<Scored[]>([])
+  const [anomalies,    setAnomalies]    = useState<AnomalyRow[]>([])
+  const [loading,      setLoading]      = useState(true)
+  const [updatedAt,    setUpdatedAt]    = useState("")
+  const [scanTickers,  setScanTickers]  = useState(DEFAULT_SCAN_TICKERS)
+  const [editingTickers, setEditingTickers] = useState(false)
+  const [editValue,    setEditValue]    = useState("")
 
   async function loadAll() {
     setLoading(true)
@@ -86,7 +90,7 @@ export default function DashboardPage() {
     const [macroRes, gexRes, scanRes] = await Promise.allSettled([
       fetch("/api/macro").then(r => r.ok ? r.json() : null),
       fetch("/api/analysis?ticker=SPY").then(r => r.ok ? r.json() : null),
-      fetch(`/api/scanner?tickers=${SCAN_TICKERS}`).then(r => r.ok ? r.json() : null),
+      fetch(`/api/scanner?tickers=${scanTickers}`).then(r => r.ok ? r.json() : null),
     ])
 
     if (macroRes.status === "fulfilled") setMacro(macroRes.value)
@@ -114,6 +118,11 @@ export default function DashboardPage() {
     setLoading(false)
   }
 
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? (localStorage.getItem(LS_SCAN_KEY) ?? DEFAULT_SCAN_TICKERS) : DEFAULT_SCAN_TICKERS
+    setScanTickers(saved)
+  }, [])
+
   useEffect(() => { loadAll() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const phase = macro?.detection?.phase
@@ -134,10 +143,51 @@ export default function DashboardPage() {
               Morning brief · {updatedAt ? `Actualizado ${updatedAt}` : "Cargando..."}
             </p>
           </div>
-          <button onClick={loadAll} disabled={loading}
-            className="text-xs px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:text-white disabled:opacity-40 transition-colors">
-            {loading ? "Actualizando..." : "↻ Actualizar"}
-          </button>
+          <div className="flex items-center gap-2">
+            {editingTickers ? (
+              <div className="flex items-center gap-2">
+                <input
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value.toUpperCase())}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      const cleaned = editValue.split(",").map(t => t.trim()).filter(Boolean).join(",")
+                      if (cleaned) {
+                        setScanTickers(cleaned)
+                        localStorage.setItem(LS_SCAN_KEY, cleaned)
+                      }
+                      setEditingTickers(false)
+                    }
+                    if (e.key === "Escape") setEditingTickers(false)
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-blue-700 text-white font-mono w-72 focus:outline-none"
+                  placeholder="SPY,QQQ,AAPL,..."
+                  autoFocus
+                />
+                <button
+                  onClick={() => {
+                    const cleaned = editValue.split(",").map(t => t.trim()).filter(Boolean).join(",")
+                    if (cleaned) { setScanTickers(cleaned); localStorage.setItem(LS_SCAN_KEY, cleaned) }
+                    setEditingTickers(false)
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white transition-colors">
+                  OK
+                </button>
+                <button onClick={() => setEditingTickers(false)} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">✕</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setEditValue(scanTickers); setEditingTickers(true) }}
+                className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-500 hover:text-gray-300 transition-colors"
+                title="Editar tickers del scanner">
+                ✏ Tickers
+              </button>
+            )}
+            <button onClick={loadAll} disabled={loading}
+              className="text-xs px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:text-white disabled:opacity-40 transition-colors">
+              {loading ? "Actualizando..." : "↻ Actualizar"}
+            </button>
+          </div>
         </div>
 
         {/* Grid principal */}

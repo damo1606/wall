@@ -207,7 +207,7 @@ export default function DiarioPage() {
   const [trades,      setTrades]      = useState<TradeEntry[]>([])
   const [showAdd,     setShowAdd]     = useState(false)
   const [closingId,   setClosingId]   = useState<string | null>(null)
-  const [filterOpen,  setFilterOpen]  = useState<"all" | "open" | "closed">("all")
+  const [filterOpen,  setFilterOpen]  = useState<"all" | "open" | "closed" | "stats">("all")
 
   useEffect(() => { setTrades(getTrades()) }, [])
 
@@ -229,6 +229,7 @@ export default function DiarioPage() {
   const filtered = trades.filter(t => {
     if (filterOpen === "open")   return t.exitPrice === undefined
     if (filterOpen === "closed") return t.exitPrice !== undefined
+    if (filterOpen === "stats")  return false // no se usa para la tabla
     return true
   })
 
@@ -237,6 +238,25 @@ export default function DiarioPage() {
   const wins   = closed.filter(t => (tradeResult(t) ?? 0) > 0).length
   const winRate = closed.length > 0 ? (wins / closed.length) * 100 : null
   const totalPnl = closed.reduce((sum, t) => sum + (tradeResult(t) ?? 0), 0)
+
+  // Agrupaciones para estadísticas
+  type GroupStats = { total: number; wins: number; pnl: number }
+
+  function computeGroup(keyFn: (t: TradeEntry) => string | undefined): Map<string, GroupStats> {
+    const m = new Map<string, GroupStats>()
+    for (const t of closed) {
+      const k = keyFn(t)
+      if (!k) continue
+      const r = tradeResult(t) ?? 0
+      const prev = m.get(k) ?? { total: 0, wins: 0, pnl: 0 }
+      m.set(k, { total: prev.total + 1, wins: prev.wins + (r > 0 ? 1 : 0), pnl: prev.pnl + r })
+    }
+    return m
+  }
+
+  const bySignal = computeGroup(t => t.signalAtEntry)
+  const byMacro  = computeGroup(t => t.macroPhase)
+  const byGex    = computeGroup(t => t.gexBias)
 
   const closingTrade = closingId ? trades.find(t => t.id === closingId) : null
 
@@ -278,20 +298,78 @@ export default function DiarioPage() {
           </div>
         )}
 
-        {/* Filtro */}
+        {/* Filtro / tabs */}
         <div className="flex gap-1 mb-4 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
-          {(["all","open","closed"] as const).map(f => (
+          {(["all","open","closed","stats"] as const).map(f => (
             <button key={f} onClick={() => setFilterOpen(f)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 filterOpen === f ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-300"
               }`}>
-              {f === "all" ? "Todas" : f === "open" ? "Abiertas" : "Cerradas"}
+              {f === "all" ? "Todas" : f === "open" ? "Abiertas" : f === "closed" ? "Cerradas" : "Estadísticas"}
             </button>
           ))}
         </div>
 
+        {/* ── Vista Estadísticas ─────────────────────────────────────────── */}
+        {filterOpen === "stats" && (() => {
+          if (closed.length === 0) return (
+            <div className="text-center py-24 text-gray-600">
+              <div className="text-4xl mb-3">📊</div>
+              <p>Cierra al menos una operación para ver estadísticas.</p>
+            </div>
+          )
+
+          function StatGroup({ title, map }: { title: string; map: Map<string, GroupStats> }) {
+            if (map.size === 0) return null
+            return (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">{title}</div>
+                <div className="space-y-3">
+                  {[...map.entries()].sort((a, b) => b[1].total - a[1].total).map(([key, s]) => {
+                    const wr = s.total > 0 ? (s.wins / s.total) * 100 : 0
+                    const insuf = s.total < 2
+                    return (
+                      <div key={key}>
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-gray-300 font-semibold capitalize">{key}</span>
+                          <div className="flex items-center gap-3">
+                            {insuf
+                              ? <span className="text-gray-600">Insuf. datos</span>
+                              : <span className={`font-mono font-bold ${wr >= 50 ? "text-green-400" : "text-red-400"}`}>{wr.toFixed(0)}% win</span>
+                            }
+                            <span className="text-gray-600">{s.total} ops</span>
+                            <span className={`font-mono ${s.pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
+                              {s.pnl >= 0 ? "+" : ""}${s.pnl.toFixed(0)}
+                            </span>
+                          </div>
+                        </div>
+                        {!insuf && (
+                          <div className="w-full bg-gray-800 rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full transition-all ${wr >= 50 ? "bg-green-500" : "bg-red-500"}`}
+                              style={{ width: `${wr}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          }
+
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <StatGroup title="Por señal de entrada" map={bySignal} />
+              <StatGroup title="Por fase macro" map={byMacro} />
+              <StatGroup title="Por bias GEX" map={byGex} />
+            </div>
+          )
+        })()}
+
         {/* Tabla */}
-        {filtered.length === 0 ? (
+        {filterOpen !== "stats" && (filtered.length === 0 ? (
           <div className="text-center py-24 text-gray-600">
             <div className="text-4xl mb-3">📒</div>
             <p>No hay operaciones registradas.</p>
@@ -381,7 +459,7 @@ export default function DiarioPage() {
               </tbody>
             </table>
           </div>
-        )}
+        ))}
       </div>
 
       {showAdd && (

@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation"
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
 import type { ScoreBreakdown } from "@/lib/scoring"
@@ -55,6 +55,103 @@ function MetricRow({ label, value, good }: { label: string; value: string; good?
   )
 }
 
+// ─── Gráfica de precio histórico ────────────────────────────────────────────
+
+function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: number }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const chartRef     = useRef<any>(null)
+  const seriesRef    = useRef<any>(null)
+  const [range,   setRange]   = useState<"1mo" | "3mo" | "6mo">("3mo")
+  const [loading, setLoading] = useState(true)
+  const [ready,   setReady]   = useState(false)
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    let removed = false
+    let observer: ResizeObserver | null = null
+
+    import("lightweight-charts").then(({ createChart, ColorType, LineStyle }) => {
+      if (removed || !containerRef.current) return
+      const chart = createChart(containerRef.current, {
+        layout: { background: { type: ColorType.Solid, color: "#030712" }, textColor: "#9ca3af" },
+        grid: { vertLines: { color: "#1f2937" }, horzLines: { color: "#1f2937" } },
+        width: containerRef.current.clientWidth,
+        height: 260,
+        rightPriceScale: { borderColor: "#374151" },
+        timeScale: { borderColor: "#374151", fixLeftEdge: true, fixRightEdge: true },
+      })
+      const series = chart.addCandlestickSeries({
+        upColor: "#10b981", downColor: "#ef4444",
+        borderUpColor: "#10b981", borderDownColor: "#ef4444",
+        wickUpColor: "#10b981", wickDownColor: "#ef4444",
+      })
+      if (grahamNumber > 0) {
+        series.createPriceLine({
+          price: grahamNumber, color: "#6ee7b7", lineWidth: 1,
+          lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "Graham #",
+        })
+      }
+      chartRef.current = chart
+      seriesRef.current = series
+      observer = new ResizeObserver(() => {
+        if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth })
+      })
+      observer.observe(containerRef.current)
+      setReady(true)
+    })
+
+    return () => {
+      removed = true
+      observer?.disconnect()
+      chartRef.current?.remove()
+      chartRef.current = null
+      seriesRef.current = null
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!ready) return
+    let cancelled = false
+    setLoading(true)
+    fetch(`/api/chart?ticker=${symbol}&range=${range}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(json => {
+        if (cancelled || !json?.candles || !seriesRef.current) return
+        seriesRef.current.setData(json.candles)
+        chartRef.current?.timeScale().fitContent()
+        setLoading(false)
+      })
+      .catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [ready, range, symbol])
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Precio Histórico</h2>
+        <div className="flex gap-1">
+          {(["1mo", "3mo", "6mo"] as const).map(r => (
+            <button key={r} onClick={() => setRange(r)}
+              className={`text-xs px-2.5 py-1 rounded transition-colors ${range === r ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-300"}`}>
+              {r === "1mo" ? "1M" : r === "3mo" ? "3M" : "6M"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="relative" style={{ height: 260 }}>
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center z-10">
+            <div className="text-gray-600 text-sm animate-pulse">Cargando gráfica...</div>
+          </div>
+        )}
+        <div ref={containerRef} className={`transition-opacity duration-300 ${loading ? "opacity-0" : "opacity-100"}`} />
+      </div>
+    </div>
+  )
+}
+
+// ─── Página ──────────────────────────────────────────────────────────────────
+
 export default function EmpresaPage() {
   const params = useParams()
   const symbol = (params.symbol as string).toUpperCase()
@@ -64,6 +161,7 @@ export default function EmpresaPage() {
   const [inPortfolio, setInPortfolio] = useState(false)
   const [inWatch, setInWatch]         = useState(false)
   const [actionDone, setActionDone]   = useState<string | null>(null)
+  const [fetchedAt,  setFetchedAt]    = useState<string | null>(null)
 
   useEffect(() => {
     setInPortfolio(getPortfolio().some(e => e.symbol === symbol))
@@ -78,16 +176,18 @@ export default function EmpresaPage() {
       fetch(`/api/stock/${symbol}`, { signal: controller.signal }).then(r => r.ok ? r.json() : Promise.reject()),
       fetch("/api/macro", { signal: controller.signal }).then(r => r.ok ? r.json() : null).catch(() => null),
     ])
-      .then(([d, macroData]: [StockData, unknown]) => {
-        const score   = scoreStock(d)
+      .then(([raw, macroData]: [StockData & { fetchedAt?: string }, unknown]) => {
+        const { fetchedAt: fa, ...d } = raw as StockData & { fetchedAt?: string }
+        setFetchedAt(fa ?? null)
+        const score   = scoreStock(d as StockData)
         const forward = analyzeForward(d)
         let macro: MacroContext | undefined
         const md = macroData as { detection?: { phase?: string; confidence?: number } } | null
         if (md?.detection?.phase) {
           macro = { phase: md.detection.phase as MacroContext["phase"], confidence: md.detection.confidence ?? 50 }
         }
-        const brain = runBrain({ score, stock: d, macro, forward })
-        setData({ ...d, score, forward, brain })
+        const brain = runBrain({ score, stock: d as StockData, macro, forward })
+        setData({ ...(d as StockData), score, forward, brain })
       })
       .catch(err => { if (err.name !== "AbortError") setError(true) })
       .finally(() => setLoading(false))
@@ -141,6 +241,14 @@ export default function EmpresaPage() {
                   </span>
                 </div>
               )}
+              {fetchedAt && (() => {
+                const mins = Math.round((Date.now() - new Date(fetchedAt).getTime()) / 60000)
+                return (
+                  <div className={`text-xs mt-1.5 ${mins > 10 ? "text-amber-400 font-semibold" : "text-gray-700"}`}>
+                    {mins > 10 ? "⚠ " : ""}Datos de hace {mins} min
+                  </div>
+                )
+              })()}
             </div>
           </div>
         </div>
@@ -286,7 +394,8 @@ export default function EmpresaPage() {
           )
         })()}
 
-        <div className="mb-6" />
+        {/* Gráfica histórica */}
+        <PriceChart symbol={symbol} grahamNumber={data.grahamNumber} />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
 
