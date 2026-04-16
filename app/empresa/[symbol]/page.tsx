@@ -90,7 +90,7 @@ function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: nu
         layout: { background: { type: ColorType.Solid, color: "#030712" }, textColor: "#9ca3af" },
         grid: { vertLines: { color: "#1f2937" }, horzLines: { color: "#1f2937" } },
         width: containerRef.current.clientWidth,
-        height: 260,
+        height: 320,
         rightPriceScale: { borderColor: "#374151" },
         timeScale: { borderColor: "#374151", fixLeftEdge: true, fixRightEdge: true },
       })
@@ -168,7 +168,7 @@ function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: nu
           ))}
         </div>
       </div>
-      <div className="relative" style={{ height: 260 }}>
+      <div className="relative" style={{ height: 320 }}>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center z-10">
             <div className="text-gray-600 text-sm animate-pulse">Cargando gráfica...</div>
@@ -303,6 +303,9 @@ export default function EmpresaPage() {
             </div>
           </div>
         </div>
+
+        {/* Gráfica histórica — visible al primer vistazo */}
+        <PriceChart symbol={symbol} grahamNumber={data.grahamNumber} />
 
         {/* Acciones rápidas */}
         <div className="flex flex-wrap gap-2 mb-6">
@@ -444,9 +447,6 @@ export default function EmpresaPage() {
             </div>
           )
         })()}
-
-        {/* Gráfica histórica */}
-        <PriceChart symbol={symbol} grahamNumber={data.grahamNumber} />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
 
