@@ -91,10 +91,17 @@ export function getWatchEntries(): WatchEntry[] {
   return read<WatchEntry>(KEYS.watchlist)
 }
 
+export const WATCH_LIMIT = 15
+
+export function isWatchFull(): boolean {
+  return getWatchEntries().length >= WATCH_LIMIT
+}
+
 export function addWatch(entry: Omit<WatchEntry, "addedAt">): WatchEntry {
   const item: WatchEntry = { ...entry, addedAt: new Date().toISOString().slice(0, 10) }
   const existing = getWatchEntries()
   if (existing.find(e => e.symbol === entry.symbol)) return item // ya existe
+  if (existing.length >= WATCH_LIMIT) return item               // límite alcanzado
   write(KEYS.watchlist, [...existing, item])
   return item
 }

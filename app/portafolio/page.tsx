@@ -9,7 +9,7 @@ import {
   getPortfolio, addPosition, removePosition,
   getWatchEntries, addWatch, removeWatch,
   getAlerts, addAlert, removeAlert, toggleAlertActive, markTriggered, resetAlert, checkAlerts,
-  alertTypeLabel, alertThresholdSuffix, GRADE_ORDER,
+  alertTypeLabel, alertThresholdSuffix, GRADE_ORDER, WATCH_LIMIT,
 } from "@/lib/portfolio"
 import type { PortfolioEntry, WatchEntry, Alert, AlertType } from "@/lib/portfolio"
 import { ErrorBoundary } from "@/app/ErrorBoundary"
@@ -27,6 +27,29 @@ function GradeBadge({ grade }: { grade: string }) {
     grade === "C"  ? "bg-yellow-600" :
     grade === "D"  ? "bg-orange-600" : "bg-red-800"
   return <span className={`${color} text-white text-xs font-black px-2 py-0.5 rounded`}>{grade}</span>
+}
+
+const SIGNAL_RANK: Record<string, number> = {
+  "Compra Fuerte": 4, "Compra": 3, "Mantener": 2, "Venta": 1, "Venta Fuerte": 0,
+}
+
+function SignalBadge({ signal }: { signal: string }) {
+  const s =
+    signal === "Compra Fuerte" ? { cls: "bg-emerald-600 text-white", icon: "▲▲" } :
+    signal === "Compra"        ? { cls: "bg-green-700 text-white",   icon: "▲"  } :
+    signal === "Mantener"      ? { cls: "bg-gray-600 text-white",    icon: "●"  } :
+    signal === "Venta"         ? { cls: "bg-orange-600 text-white",  icon: "▼"  } :
+                                 { cls: "bg-red-700 text-white",     icon: "▼▼" }
+  return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.cls}`}>{s.icon} {signal}</span>
+}
+
+function heatRow(buyScore: number | undefined): string {
+  if (buyScore === undefined) return "border-l-4 border-gray-800"
+  if (buyScore >= 75) return "border-l-4 border-emerald-500 bg-emerald-950/20"
+  if (buyScore >= 55) return "border-l-4 border-green-600 bg-green-950/10"
+  if (buyScore >= 35) return "border-l-4 border-yellow-600 bg-yellow-950/10"
+  if (buyScore >= 15) return "border-l-4 border-orange-600 bg-orange-950/10"
+  return "border-l-4 border-red-700 bg-red-950/20"
 }
 
 // ─── Modal Agregar Posición ───────────────────────────────────────────────────
@@ -191,7 +214,7 @@ function AddAlertModal({ onClose, onAdd, defaultSymbol = "" }: {
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 type PortSortCol  = "symbol" | "qty" | "buy" | "current" | "pnl" | "pnlpct" | "grade" | "buyscore"
-type WatchSortCol = "symbol" | "current" | "target" | "vstarget" | "drop" | "grade" | "buyscore"
+type WatchSortCol = "symbol" | "current" | "target" | "vstarget" | "drop" | "grade" | "buyscore" | "signal"
 
 export default function PortafolioPage() {
   const [tab, setTab]             = useState<"portfolio" | "watch" | "alerts">("portfolio")
@@ -339,7 +362,7 @@ export default function PortafolioPage() {
         <div className="flex gap-1 mb-6 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
           {([
             { key: "portfolio", label: "Portafolio" },
-            { key: "watch",     label: "Seguimiento" },
+            { key: "watch",     label: `Seguimiento (${watchList.length}/${WATCH_LIMIT})` },
             { key: "alerts",    label: `Alertas${triggeredCount > 0 ? ` (${triggeredCount})` : ""}` },
           ] as const).map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
@@ -399,7 +422,7 @@ export default function PortafolioPage() {
                         { col: "pnl"     as PortSortCol, label: "P&L $",       align: "right" },
                         { col: "pnlpct"  as PortSortCol, label: "P&L %",       align: "right" },
                         { col: "grade"   as PortSortCol, label: "Grado",       align: "left"  },
-                        { col: "buyscore"as PortSortCol, label: "Buy Score",   align: "right" },
+                        { col: "buyscore"as PortSortCol, label: "Score",       align: "right" },
                       ]).map(({ col, label, align }) => (
                         <th key={col}
                           onClick={() => handlePortSort(col)}
@@ -407,6 +430,8 @@ export default function PortafolioPage() {
                           {label} {sortIcon(portSort === col, portDir)}
                         </th>
                       ))}
+                      <th className="pb-2 pr-4 text-left text-xs text-gray-500">Señal</th>
+                      <th className="pb-2 pr-4 text-left text-xs text-gray-500">Fecha</th>
                       <th className="pb-2"></th>
                     </tr>
                   </thead>
@@ -434,13 +459,17 @@ export default function PortafolioPage() {
                         <td className="py-3 pr-4">
                           {e.live ? <GradeBadge grade={e.live.score.grade} /> : <span className="text-gray-700 text-xs">—</span>}
                         </td>
-                        <td className="py-3 pr-4 text-right font-mono text-gray-400">
-                          {e.live ? (
-                            e.live.score.buyReady
-                              ? <span className="text-xs font-bold px-2 py-0.5 rounded bg-emerald-700 text-white">Compra {e.live.score.buyScore}</span>
-                              : e.live.score.buyScore
-                          ) : "—"}
+                        <td className="py-3 pr-4 text-right font-mono text-gray-300 font-bold">
+                          {e.live ? e.live.score.buyScore : "—"}
                         </td>
+                        <td className="py-3 pr-4">
+                          {e.live ? (
+                            e.live.score.signal === "Venta" || e.live.score.signal === "Venta Fuerte"
+                              ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-700 text-white">⚠ Revisar</span>
+                              : <SignalBadge signal={e.live.score.signal} />
+                          ) : <span className="text-gray-700 text-xs">—</span>}
+                        </td>
+                        <td className="py-3 pr-4 text-xs text-gray-600">{e.buyDate}</td>
                         <td className="py-3">
                           <button onClick={() => { removePosition(e.id); setPortfolio(getPortfolio()) }}
                             className="text-gray-700 hover:text-red-400 transition-colors text-lg leading-none">✕</button>
@@ -471,6 +500,7 @@ export default function PortafolioPage() {
               case "drop":     va = la?.dropFrom52w ?? 0;    vb = lb?.dropFrom52w ?? 0;    break
               case "grade":    va = GO.indexOf(la?.score.grade ?? "F"); vb = GO.indexOf(lb?.score.grade ?? "F"); break
               case "buyscore": va = la?.score.buyScore ?? 0; vb = lb?.score.buyScore ?? 0; break
+              case "signal":   va = SIGNAL_RANK[la?.score.signal ?? ""] ?? 0; vb = SIGNAL_RANK[lb?.score.signal ?? ""] ?? 0; break
               default:         va = 0; vb = 0
             }
             return watchDir === "desc" ? vb - va : va - vb
@@ -478,7 +508,10 @@ export default function PortafolioPage() {
           return (
           <div>
             <div className="flex justify-between items-center mb-4">
-              <span className="text-sm text-gray-400">{watchList.length} en seguimiento</span>
+              <span className="text-sm text-gray-400">
+                {watchList.length}/{WATCH_LIMIT} en seguimiento
+                {watchList.length >= WATCH_LIMIT && <span className="ml-2 text-orange-400 text-xs font-semibold">límite alcanzado</span>}
+              </span>
               <button onClick={() => refreshData(watchList.map(e => e.symbol))}
                 disabled={loadingSymbols.size > 0}
                 className="text-xs px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40">
@@ -498,13 +531,14 @@ export default function PortafolioPage() {
                   <thead>
                     <tr className="text-left text-xs text-gray-500 border-b border-gray-800">
                       {([
-                        { col: "symbol"  as WatchSortCol, label: "Empresa",    align: "left"  },
-                        { col: "current" as WatchSortCol, label: "Actual",      align: "right" },
-                        { col: "target"  as WatchSortCol, label: "Target",      align: "right" },
-                        { col: "vstarget"as WatchSortCol, label: "vs Target",   align: "right" },
+                        { col: "signal"  as WatchSortCol, label: "Señal",       align: "left"  },
+                        { col: "symbol"  as WatchSortCol, label: "Empresa",     align: "left"  },
+                        { col: "current" as WatchSortCol, label: "Precio",      align: "right" },
                         { col: "drop"    as WatchSortCol, label: "Caída 52w",   align: "right" },
+                        { col: "target"  as WatchSortCol, label: "Graham %",    align: "right" },
+                        { col: "vstarget"as WatchSortCol, label: "Upside",      align: "right" },
                         { col: "grade"   as WatchSortCol, label: "Grado",       align: "left"  },
-                        { col: "buyscore"as WatchSortCol, label: "Buy Score",   align: "right" },
+                        { col: "buyscore"as WatchSortCol, label: "Score",       align: "right" },
                       ]).map(({ col, label, align }) => (
                         <th key={col}
                           onClick={() => handleWatchSort(col)}
@@ -519,38 +553,36 @@ export default function PortafolioPage() {
                   <tbody>
                     {watchSorted.map(e => {
                       const live = liveData.get(e.symbol)
-                      const vsTarget = (live && e.targetPrice)
-                        ? ((e.targetPrice - live.currentPrice) / live.currentPrice) * 100
-                        : null
+                      const graham = live?.discountToGraham ?? null
+                      const upside = live?.upsideToTarget ?? null
                       return (
-                        <tr key={e.symbol} className="border-b border-gray-800/50 hover:bg-gray-900/50">
+                        <tr key={e.symbol} className={`border-b border-gray-800/50 hover:brightness-110 transition-all ${heatRow(live?.score.buyScore)}`}>
+                          <td className="py-3 pr-4">
+                            {live ? <SignalBadge signal={live.score.signal} /> : <span className="text-gray-700 text-xs">—</span>}
+                          </td>
                           <td className="py-3 pr-6">
                             <Link href={`/empresa/${e.symbol}`} className="hover:opacity-80">
                               <div className="font-bold text-white">{e.symbol}</div>
-                              <div className="text-xs text-gray-500 truncate max-w-[150px]">{e.company}</div>
+                              <div className="text-xs text-gray-500 truncate max-w-[130px]">{e.company}</div>
                             </Link>
                           </td>
                           <td className="py-3 pr-4 text-right font-mono">
                             {loadingSymbols.has(e.symbol) ? <span className="text-gray-600">…</span> : usd(live?.currentPrice ?? 0)}
                           </td>
-                          <td className="py-3 pr-4 text-right font-mono text-gray-400">
-                            {e.targetPrice ? `$${e.targetPrice.toFixed(2)}` : "—"}
-                          </td>
-                          <td className={`py-3 pr-4 text-right font-mono font-bold ${vsTarget === null ? "text-gray-600" : vsTarget >= 0 ? "text-green-400" : "text-red-400"}`}>
-                            {vsTarget !== null ? pct(vsTarget) : "—"}
-                          </td>
                           <td className={`py-3 pr-4 text-right font-mono ${live && live.dropFrom52w <= -20 ? "text-green-400" : "text-gray-400"}`}>
                             {live ? `${live.dropFrom52w.toFixed(1)}%` : "—"}
+                          </td>
+                          <td className={`py-3 pr-4 text-right font-mono font-bold ${graham === null ? "text-gray-600" : graham <= -10 ? "text-green-400" : graham >= 0 ? "text-red-400" : "text-yellow-300"}`}>
+                            {graham !== null ? pct(graham) : "—"}
+                          </td>
+                          <td className={`py-3 pr-4 text-right font-mono font-bold ${upside === null ? "text-gray-600" : upside >= 20 ? "text-green-400" : upside >= 0 ? "text-yellow-300" : "text-red-400"}`}>
+                            {upside !== null ? pct(upside) : "—"}
                           </td>
                           <td className="py-3 pr-4">
                             {live ? <GradeBadge grade={live.score.grade} /> : <span className="text-gray-700 text-xs">—</span>}
                           </td>
-                          <td className="py-3 pr-4 text-right font-mono">
-                            {live ? (
-                              live.score.buyReady
-                                ? <span className="text-xs font-bold px-2 py-0.5 rounded bg-emerald-700 text-white">Compra {live.score.buyScore}</span>
-                                : <span className="text-gray-400">{live.score.buyScore}</span>
-                            ) : "—"}
+                          <td className="py-3 pr-4 text-right font-mono text-gray-300 font-bold">
+                            {live ? live.score.buyScore : "—"}
                           </td>
                           <td className="py-3 pr-4 text-xs text-gray-600">{e.addedAt}</td>
                           <td className="py-3">
