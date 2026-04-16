@@ -229,6 +229,7 @@ export default function PortafolioPage() {
   const [portDir, setPortDir]     = useState<"asc" | "desc">("desc")
   const [watchSort, setWatchSort] = useState<WatchSortCol>("buyscore")
   const [watchDir, setWatchDir]   = useState<"asc" | "desc">("desc")
+  const [savedSignals, setSavedSignals] = useState<Record<string, string>>({})
 
   function handlePortSort(col: PortSortCol) {
     if (portSort === col) setPortDir(d => d === "desc" ? "asc" : "desc")
@@ -247,6 +248,10 @@ export default function PortafolioPage() {
     setPortfolio(getPortfolio())
     setWatchList(getWatchEntries())
     setAlerts(getAlerts())
+    try {
+      const saved = JSON.parse(localStorage.getItem("wall_watchlist_state") ?? "{}")
+      setSavedSignals(saved)
+    } catch {}
   }, [])
 
   // Todos los símbolos únicos que necesitan datos live
@@ -306,6 +311,16 @@ export default function PortafolioPage() {
   }
 
   const triggeredCount = alerts.filter(a => a.triggered).length
+
+  function saveSignalState() {
+    const state: Record<string, string> = {}
+    watchList.forEach(e => {
+      const live = liveData.get(e.symbol)
+      if (live) state[e.symbol] = live.score.signal
+    })
+    try { localStorage.setItem("wall_watchlist_state", JSON.stringify(state)) } catch {}
+    setSavedSignals(state)
+  }
 
   // ── Portafolio: cálculos ────────────────────────────────────────────────────
   const portfolioWithLive = portfolio.map(e => {
@@ -512,11 +527,19 @@ export default function PortafolioPage() {
                 {watchList.length}/{WATCH_LIMIT} en seguimiento
                 {watchList.length >= WATCH_LIMIT && <span className="ml-2 text-orange-400 text-xs font-semibold">límite alcanzado</span>}
               </span>
-              <button onClick={() => refreshData(watchList.map(e => e.symbol))}
-                disabled={loadingSymbols.size > 0}
-                className="text-xs px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40">
-                Verificar ahora
-              </button>
+              <div className="flex gap-2">
+                <button onClick={saveSignalState}
+                  disabled={liveData.size === 0}
+                  className="text-xs px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-40"
+                  title="Guarda las señales actuales como referencia para detectar cambios">
+                  Guardar estado
+                </button>
+                <button onClick={() => refreshData(watchList.map(e => e.symbol))}
+                  disabled={loadingSymbols.size > 0}
+                  className="text-xs px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40">
+                  Verificar ahora
+                </button>
+              </div>
             </div>
 
             {watchList.length === 0 ? (
@@ -558,7 +581,14 @@ export default function PortafolioPage() {
                       return (
                         <tr key={e.symbol} className={`border-b border-gray-800/50 hover:brightness-110 transition-all ${heatRow(live?.score.buyScore)}`}>
                           <td className="py-3 pr-4">
-                            {live ? <SignalBadge signal={live.score.signal} /> : <span className="text-gray-700 text-xs">—</span>}
+                            <div className="flex flex-col gap-0.5 items-start">
+                              {live ? <SignalBadge signal={live.score.signal} /> : <span className="text-gray-700 text-xs">—</span>}
+                              {live && savedSignals[e.symbol] && live.score.signal !== savedSignals[e.symbol] && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-600 text-white whitespace-nowrap">
+                                  ⚠ CAMBIÓ
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-3 pr-6">
                             <Link href={`/empresa/${e.symbol}`} className="hover:opacity-80">

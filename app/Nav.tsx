@@ -18,6 +18,7 @@ const ACCIONES: NavPage[] = [
   { href: "/scanner-pro", label: "Scanner Pro",  exact: true },
   { href: "/comparar",   label: "Comparar",     exact: true },
   { href: "/dashboard",  label: "Dashboard",    exact: true },
+  { href: "/diario",     label: "Diario",       exact: true },
 ]
 
 const OPCIONES: NavPage[] = [
