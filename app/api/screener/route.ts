@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     SP500_SYMBOLS
   ).slice(0, limit)
 
-  const results = await Promise.allSettled(symbols.map(fetchStockData))
+  const results = await Promise.allSettled(symbols.map(s => fetchStockData(s)))
 
   const stocks = results
     .filter(
