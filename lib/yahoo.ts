@@ -181,11 +181,16 @@ export type StockData = {
   earningsDate?: string   // "2026-04-30" — próxima fecha de earnings (puede ser undefined)
 }
 
-function buildUrl(symbol: string, crumb: string) {
-  return `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=price,summaryDetail,financialData,defaultKeyStatistics,assetProfile,calendarEvents&crumb=${encodeURIComponent(crumb)}`
+function buildUrl(symbol: string, crumb: string, calendar = false) {
+  const modules = calendar
+    ? "price,summaryDetail,financialData,defaultKeyStatistics,assetProfile,calendarEvents"
+    : "price,summaryDetail,financialData,defaultKeyStatistics,assetProfile"
+  return `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=${modules}&crumb=${encodeURIComponent(crumb)}`
 }
 
-export async function fetchStockData(symbol: string): Promise<StockData | null> {
+export { getCrumb }
+
+export async function fetchStockData(symbol: string, calendar = false): Promise<StockData | null> {
   try {
     let auth = await getCrumb()
     if (!auth) {
@@ -197,7 +202,7 @@ export async function fetchStockData(symbol: string): Promise<StockData | null> 
 
     for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
       try {
-        const res = await fetchWithTimeout(buildUrl(symbol, auth.crumb), {
+        const res = await fetchWithTimeout(buildUrl(symbol, auth.crumb, calendar), {
           headers: { "User-Agent": UA, Cookie: auth.cookie },
           next: { revalidate: 3600 },
         })

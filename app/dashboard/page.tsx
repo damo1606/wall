@@ -5,6 +5,7 @@ import Link from "next/link"
 import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
 import type { ScoreBreakdown } from "@/lib/scoring"
+import { getTrades, tradeResult } from "@/lib/diario"
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -14,9 +15,14 @@ type Phase  = "recovery" | "expansion" | "late" | "recession"
 interface MacroData {
   detection?: { phase: Phase; confidence: number }
   vix?: number
+  vix9d?: number
   vix3m?: number
+  vvix?: number
+  equityPcr?: number
   spyPcr?: number
 }
+
+interface GexLevels { support: number; gammaFlip: number }
 
 interface GexData {
   spot?: number
@@ -38,6 +44,13 @@ interface AnomalyRow {
 const DEFAULT_SCAN_TICKERS = "SPY,QQQ,IWM,AAPL,TSLA,NVDA,MSFT,META,AMZN,GOOGL"
 const LS_SCAN_KEY = "wall_dashboard_tickers"
 const OPP_TICKERS  = ["AAPL","MSFT","GOOGL","AMZN","NVDA","META","JPM","JNJ","V","WMT","HD","KO","XOM","UNH","TSLA"]
+
+const PRESET_UNIVERSES: Record<string, string> = {
+  "MAG7":        "AAPL,MSFT,GOOGL,AMZN,NVDA,META,TSLA",
+  "BANCOS":      "JPM,BAC,GS,MS,C,WFC,USB",
+  "ENERGÍA":     "XOM,CVX,SLB,COP,MPC,VLO,HAL",
+  "VOLATILIDAD": "SPY,QQQ,IWM,GLD,TLT,HYG,XLF",
+}
 
 const PHASE_CFG: Record<Phase, { label: string; badge: string; icon: string }> = {
   recovery:  { label: "Recuperación",    badge: "bg-blue-900/60 border-blue-700 text-blue-200",   icon: "↗" },
@@ -82,6 +95,9 @@ export default function DashboardPage() {
   const [scanTickers,  setScanTickers]  = useState(DEFAULT_SCAN_TICKERS)
   const [editingTickers, setEditingTickers] = useState(false)
   const [editValue,    setEditValue]    = useState("")
+  const [oppLevels,    setOppLevels]    = useState<Record<string, GexLevels>>({})
+  const [winRates,     setWinRates]     = useState<Record<string, { wr: number; n: number }>>({})
+  const [phaseWinRate, setPhaseWinRate] = useState<{ wr: number; n: number } | null>(null)
 
   async function loadAll() {
     setLoading(true)
@@ -112,7 +128,54 @@ export default function DashboardPage() {
       })
     )
     const scored = results.filter(Boolean) as Scored[]
-    setOpps(scored.sort((a, b) => b.score.buyScore - a.score.buyScore).slice(0, 5))
+    const top5 = scored.sort((a, b) => b.score.buyScore - a.score.buyScore).slice(0, 5)
+    setOpps(top5)
+
+    // R2: GEX levels (soporte + gammaFlip) para el top-5
+    const levelsResults = await Promise.allSettled(
+      top5.map(async s => {
+        try {
+          const r = await fetch(`/api/analysis?ticker=${s.symbol}`)
+          if (!r.ok) return null
+          const d = await r.json()
+          return { symbol: s.symbol, support: d.levels?.support ?? 0, gammaFlip: d.levels?.gammaFlip ?? 0 }
+        } catch { return null }
+      })
+    )
+    const levels: Record<string, GexLevels> = {}
+    for (const r of levelsResults) {
+      if (r.status === "fulfilled" && r.value) {
+        levels[r.value.symbol] = { support: r.value.support, gammaFlip: r.value.gammaFlip }
+      }
+    }
+    setOppLevels(levels)
+
+    // R4: Win rates del Diario por señal y por fase macro
+    try {
+      const trades = getTrades()
+      const closed = trades.filter(t => t.exitPrice != null)
+      const sigGroups: Record<string, { wins: number; total: number }> = {}
+      for (const t of closed) {
+        if (!t.signalAtEntry) continue
+        if (!sigGroups[t.signalAtEntry]) sigGroups[t.signalAtEntry] = { wins: 0, total: 0 }
+        sigGroups[t.signalAtEntry].total++
+        if ((tradeResult(t) ?? 0) > 0) sigGroups[t.signalAtEntry].wins++
+      }
+      const wrs: Record<string, { wr: number; n: number }> = {}
+      for (const [sig, g] of Object.entries(sigGroups)) {
+        if (g.total >= 5) wrs[sig] = { wr: Math.round((g.wins / g.total) * 100), n: g.total }
+      }
+      setWinRates(wrs)
+
+      const currentPhase = macroRes.status === "fulfilled" ? macroRes.value?.detection?.phase : null
+      if (currentPhase) {
+        const phaseT = closed.filter(t => t.macroPhase === currentPhase)
+        if (phaseT.length >= 5) {
+          const wins = phaseT.filter(t => (tradeResult(t) ?? 0) > 0).length
+          setPhaseWinRate({ wr: Math.round((wins / phaseT.length) * 100), n: phaseT.length })
+        }
+      }
+    } catch {}
 
     setUpdatedAt(new Date().toLocaleTimeString("es-ES"))
     setLoading(false)
@@ -143,7 +206,20 @@ export default function DashboardPage() {
               Morning brief · {updatedAt ? `Actualizado ${updatedAt}` : "Cargando..."}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {!editingTickers && (
+              <div className="flex items-center gap-1">
+                {Object.entries(PRESET_UNIVERSES).map(([name, tickers]) => (
+                  <button key={name} onClick={() => {
+                    setScanTickers(tickers)
+                    localStorage.setItem(LS_SCAN_KEY, tickers)
+                  }}
+                    className={`text-[10px] px-2 py-1 border transition-colors ${scanTickers === tickers ? "border-blue-600 text-blue-300 bg-blue-900/30" : "border-gray-700 text-gray-500 hover:text-gray-300"}`}>
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
             {editingTickers ? (
               <div className="flex items-center gap-2">
                 <input
@@ -220,15 +296,47 @@ export default function DashboardPage() {
                       <div className="text-xl font-black font-mono text-gray-300">{macro.vix3m.toFixed(1)}</div>
                     </div>
                   )}
-                  {macro.spyPcr != null && (
-                    <div className="bg-gray-800/60 rounded-xl p-3 text-center">
-                      <div className="text-xs text-gray-500 mb-1">PCR SPY</div>
-                      <div className={`text-xl font-black font-mono ${macro.spyPcr > 1.2 ? "text-red-400" : macro.spyPcr < 0.8 ? "text-green-400" : "text-gray-300"}`}>
-                        {macro.spyPcr.toFixed(2)}
+                  {(macro.equityPcr ?? macro.spyPcr) != null && (() => {
+                    const pcr = (macro.equityPcr ?? macro.spyPcr)!
+                    return (
+                      <div className="bg-gray-800/60 rounded-xl p-3 text-center">
+                        <div className="text-xs text-gray-500 mb-1">{macro.equityPcr != null ? "PCR EQUITY" : "PCR SPY"}</div>
+                        <div className={`text-xl font-black font-mono ${pcr > 1.2 ? "text-red-400" : pcr < 0.7 ? "text-green-400" : "text-gray-300"}`}>
+                          {pcr.toFixed(2)}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )
+                  })()}
                 </div>
+                {/* VIX term structure + alertas */}
+                {(macro.vix9d != null || macro.vvix != null) && (
+                  <div className="mt-3 space-y-1.5">
+                    {macro.vix9d != null && macro.vix != null && (
+                      <div className="flex items-center gap-2 text-xs font-mono text-gray-400">
+                        <span className="text-gray-600 text-[10px] tracking-widest">VIX TERM</span>
+                        <span className={macro.vix9d > macro.vix ? "text-amber-300 font-bold" : "text-gray-300"}>{macro.vix9d.toFixed(1)}<span className="text-gray-600 text-[9px] ml-0.5">9D</span></span>
+                        <span className="text-gray-700">›</span>
+                        <span>{macro.vix.toFixed(1)}<span className="text-gray-600 text-[9px] ml-0.5">30D</span></span>
+                        {macro.vix3m != null && <><span className="text-gray-700">›</span><span>{macro.vix3m.toFixed(1)}<span className="text-gray-600 text-[9px] ml-0.5">3M</span></span></>}
+                      </div>
+                    )}
+                    {macro.vix9d != null && macro.vix != null && macro.vix9d > macro.vix && (
+                      <div className="text-[10px] px-2 py-0.5 rounded bg-amber-900/60 border border-amber-700 text-amber-200 inline-block">
+                        ⚡ EVENTO INMINENTE — VIX9D ({macro.vix9d.toFixed(1)}) &gt; VIX ({macro.vix.toFixed(1)})
+                      </div>
+                    )}
+                    {macro.vvix != null && macro.vvix > 100 && (
+                      <div className="text-[10px] px-2 py-0.5 rounded bg-red-900/60 border border-red-700 text-red-200 inline-block">
+                        ⚠ ESTRÉS SISTÉMICO — VVIX {macro.vvix.toFixed(0)}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {phaseWinRate && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    Esta fase en tu historial: <span className={`font-bold ${phaseWinRate.wr >= 50 ? "text-green-400" : "text-red-400"}`}>{phaseWinRate.wr}% WR</span> <span className="text-gray-600">({phaseWinRate.n} trades)</span>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-gray-600 text-sm">Sin datos de macro disponibles</div>
@@ -324,14 +432,22 @@ export default function DashboardPage() {
                       </div>
                       <div className="text-right shrink-0">
                         <div className="font-mono text-sm text-white">{usd(s.currentPrice)}</div>
-                        <div className={`text-xs font-mono ${s.discountToGraham <= -10 ? "text-green-400" : s.discountToGraham >= 0 ? "text-red-400" : "text-yellow-300"}`}>
-                          G: {pct(s.discountToGraham)}
-                        </div>
+                        {oppLevels[s.symbol]?.support > 0 && (
+                          <div className="text-[10px] font-mono mt-0.5">
+                            <span className="text-emerald-400">↓{usd(oppLevels[s.symbol].support)}</span>
+                            <span className="text-gray-600 ml-1">stop {usd(oppLevels[s.symbol].gammaFlip)}</span>
+                          </div>
+                        )}
                       </div>
                       <div className="shrink-0">
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${sig?.cls ?? "bg-gray-700 text-white"}`}>
                           {sig?.icon} {s.score.signal}
                         </span>
+                        {winRates[s.score.signal] && (
+                          <div className={`text-[9px] font-mono mt-0.5 text-center ${winRates[s.score.signal].wr >= 50 ? "text-green-400" : "text-red-400"}`}>
+                            {winRates[s.score.signal].wr}% WR ({winRates[s.score.signal].n})
+                          </div>
+                        )}
                       </div>
                       <div className="text-xs font-mono text-gray-400 shrink-0 w-8 text-right">
                         {s.score.buyScore}

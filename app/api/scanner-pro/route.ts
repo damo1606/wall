@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getCrumb } from "@/lib/yahoo";
 import { computeAnalysis } from "@/lib/gex";
 import { computeAnalysis2 } from "@/lib/gex2";
 import { computeAnalysis3 } from "@/lib/gex3";
@@ -18,18 +19,9 @@ const HEADERS = {
   Referer: "https://finance.yahoo.com/",
 };
 
-async function getCredentials(): Promise<{ crumb: string; cookie: string }> {
-  const res1 = await fetch("https://fc.yahoo.com", { headers: HEADERS, redirect: "follow" });
-  const setCookie = res1.headers.get("set-cookie") ?? "";
-  const cookie = setCookie.split(",").map((c) => c.split(";")[0].trim()).join("; ");
-  const res2 = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
-    headers: { ...HEADERS, Cookie: cookie },
-  });
-  if (!res2.ok) throw new Error(`Could not get crumb (${res2.status})`);
-  const crumb = await res2.text();
-  if (!crumb || crumb.includes("<")) throw new Error("Invalid crumb response");
-  return { crumb, cookie };
-}
+let _m6Cache: { data: Analysis6Result; ts: number } | null = null
+let _m6Promise: Promise<Analysis6Result> | null = null
+const M6_TTL = 5 * 60 * 1000
 
 async function fetchOptions(ticker: string, cookie: string, crumb: string, dateTs?: number) {
   const params = new URLSearchParams({ crumb });
@@ -117,6 +109,15 @@ async function fetchMarketRegime(cookie: string, crumb: string): Promise<Analysi
 
   const { gexTotal: spyGexTotal, pcr: spyPcr } = computeSpyMetrics(spyCalls, spyPuts, spySpot, T);
   return computeRegime(vix, vix3m, vixHistory, spyGexTotal, spyPcr, spySpot, hygChange5d, spyVsSma50);
+}
+
+async function getCachedM6(cookie: string, crumb: string): Promise<Analysis6Result> {
+  if (_m6Cache && Date.now() - _m6Cache.ts < M6_TTL) return _m6Cache.data
+  if (!_m6Promise) _m6Promise = fetchMarketRegime(cookie, crumb)
+  const data = await _m6Promise
+  _m6Cache = { data, ts: Date.now() }
+  _m6Promise = null
+  return data
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -310,23 +311,20 @@ export async function GET(request: NextRequest) {
   if (scored.length === 0) return NextResponse.json({ rows: [], total: 0 });
 
   // 3. Yahoo credentials (shared)
-  let crumb = "", cookie = "";
-  try {
-    ({ crumb, cookie } = await getCredentials());
-  } catch (e: any) {
-    return NextResponse.json({ error: `Yahoo auth: ${e.message}` }, { status: 500 });
-  }
+  const auth = await getCrumb();
+  if (!auth) return NextResponse.json({ error: "Yahoo auth: no se pudo obtener crumb" }, { status: 500 });
+  const { crumb, cookie } = auth;
 
-  // 4. M6 — régimen de mercado (global, fetch once)
+  // 4. M6 — régimen de mercado (global, cacheado 5 min)
   let m6: Analysis6Result;
   try {
-    m6 = await fetchMarketRegime(cookie, crumb);
+    m6 = await getCachedM6(cookie, crumb);
   } catch (e: any) {
     return NextResponse.json({ error: `Régimen M6: ${e.message}` }, { status: 500 });
   }
 
   // 5. M1 + M2 + M3 + M5 + M7 per ticker in parallel batches
-  const BATCH = 6;
+  const BATCH = 4;
   const rows: ConvictionRow[] = [];
 
   for (let i = 0; i < scored.length; i += BATCH) {

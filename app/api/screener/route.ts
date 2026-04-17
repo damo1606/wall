@@ -6,11 +6,12 @@ export async function GET(request: Request) {
   const universe = searchParams.get("universe") ?? "dia"
   const limit    = parseInt(searchParams.get("limit") ?? "50")
 
-  const symbols =
+  const symbols = (
     universe === "dia"     ? DJIA_SYMBOLS :
     universe === "nasdaq"  ? NASDAQ100_SYMBOLS :
     universe === "russell" ? RUSSELL_SYMBOLS :
-    SP500_SYMBOLS.slice(0, limit)
+    SP500_SYMBOLS
+  ).slice(0, limit)
 
   const results = await Promise.allSettled(symbols.map(fetchStockData))
 

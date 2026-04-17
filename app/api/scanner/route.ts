@@ -145,7 +145,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const tickerParam = searchParams.get("tickers");
     const tickers = tickerParam
-      ? tickerParam.split(",").map((t) => t.trim().toUpperCase()).slice(0, 15)
+      ? tickerParam.split(",").map((t) => t.trim().toUpperCase()).slice(0, 30)
       : DEFAULT_TICKERS;
 
     const expParam = searchParams.get("expiration");
