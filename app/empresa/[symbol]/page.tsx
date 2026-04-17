@@ -196,8 +196,8 @@ export default function EmpresaPage() {
   const [ivData,     setIvData]       = useState<{ atmIv: number; ivRank: number | null; ivPercentile: number | null; samples: number } | null>(null)
 
   useEffect(() => {
-    setInPortfolio(getPortfolio().some(e => e.symbol === symbol))
-    setInWatch(isWatching(symbol))
+    getPortfolio().then(p => setInPortfolio(p.some(e => e.symbol === symbol)))
+    isWatching(symbol).then(setInWatch)
   }, [symbol])
 
   useEffect(() => {

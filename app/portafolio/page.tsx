@@ -243,11 +243,16 @@ export default function PortafolioPage() {
     return <span className="text-[10px]">{active ? (dir === "desc" ? "▼" : "▲") : "↕"}</span>
   }
 
-  // Cargar desde localStorage al montar
+  async function reload() {
+    const [p, w, a] = await Promise.all([getPortfolio(), getWatchEntries(), getAlerts()])
+    setPortfolio(p)
+    setWatchList(w)
+    setAlerts(a)
+  }
+
+  // Cargar desde Supabase al montar
   useEffect(() => {
-    setPortfolio(getPortfolio())
-    setWatchList(getWatchEntries())
-    setAlerts(getAlerts())
+    reload()
     try {
       const saved = JSON.parse(localStorage.getItem("wall_watchlist_state") ?? "{}")
       setSavedSignals(saved)
@@ -295,7 +300,7 @@ export default function PortafolioPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Alertas: verificar y marcar disparadas ──────────────────────────────────
-  function verifyAlerts() {
+  async function verifyAlerts() {
     const dataMap = new Map<string, Parameters<typeof checkAlerts>[1] extends Map<string, infer V> ? V : never>()
     liveData.forEach((d, sym) => dataMap.set(sym, {
       symbol: sym,
@@ -306,8 +311,8 @@ export default function PortafolioPage() {
       buyReady: d.score.buyReady,
     }))
     const triggered = checkAlerts(alerts, dataMap)
-    triggered.forEach(id => markTriggered(id))
-    setAlerts(getAlerts())
+    await Promise.all(triggered.map(id => markTriggered(id)))
+    setAlerts(await getAlerts())
   }
 
   const triggeredCount = alerts.filter(a => a.triggered).length
@@ -486,7 +491,7 @@ export default function PortafolioPage() {
                         </td>
                         <td className="py-3 pr-4 text-xs text-gray-600">{e.buyDate}</td>
                         <td className="py-3">
-                          <button onClick={() => { removePosition(e.id); setPortfolio(getPortfolio()) }}
+                          <button onClick={async () => { await removePosition(e.id); setPortfolio(await getPortfolio()) }}
                             className="text-gray-700 hover:text-red-400 transition-colors text-lg leading-none">✕</button>
                         </td>
                       </tr>
@@ -616,7 +621,7 @@ export default function PortafolioPage() {
                           </td>
                           <td className="py-3 pr-4 text-xs text-gray-600">{e.addedAt}</td>
                           <td className="py-3">
-                            <button onClick={() => { removeWatch(e.symbol); setWatchList(getWatchEntries()) }}
+                            <button onClick={async () => { await removeWatch(e.symbol); setWatchList(await getWatchEntries()) }}
                               className="text-gray-700 hover:text-red-400 transition-colors text-lg leading-none">✕</button>
                           </td>
                         </tr>
@@ -683,17 +688,17 @@ export default function PortafolioPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {a.triggered ? (
-                        <button onClick={() => { resetAlert(a.id); setAlerts(getAlerts()) }}
+                        <button onClick={async () => { await resetAlert(a.id); setAlerts(await getAlerts()) }}
                           className="text-xs px-2 py-1 rounded bg-gray-700 text-gray-300 hover:text-white transition-colors">
                           Reset
                         </button>
                       ) : (
-                        <button onClick={() => { toggleAlertActive(a.id); setAlerts(getAlerts()) }}
+                        <button onClick={async () => { await toggleAlertActive(a.id, a.active); setAlerts(await getAlerts()) }}
                           className={`text-xs px-2 py-1 rounded transition-colors ${a.active ? "bg-gray-700 text-gray-300 hover:text-white" : "bg-green-900 text-green-400 hover:text-white"}`}>
                           {a.active ? "Pausar" : "Activar"}
                         </button>
                       )}
-                      <button onClick={() => { removeAlert(a.id); setAlerts(getAlerts()) }}
+                      <button onClick={async () => { await removeAlert(a.id); setAlerts(await getAlerts()) }}
                         className="text-gray-700 hover:text-red-400 transition-colors text-lg leading-none">✕</button>
                     </div>
                   </div>
@@ -708,13 +713,13 @@ export default function PortafolioPage() {
       {showAddPos && (
         <AddPositionModal
           onClose={() => setShowAddPos(false)}
-          onAdd={entry => { addPosition(entry); setPortfolio(getPortfolio()); refreshData([entry.symbol]) }}
+          onAdd={async entry => { await addPosition(entry); setPortfolio(await getPortfolio()); refreshData([entry.symbol]) }}
         />
       )}
       {showAddAlert && (
         <AddAlertModal
           onClose={() => setShowAddAlert(false)}
-          onAdd={a => { addAlert(a); setAlerts(getAlerts()) }}
+          onAdd={async a => { await addAlert(a); setAlerts(await getAlerts()) }}
         />
       )}
     </main>
