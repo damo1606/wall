@@ -1,4 +1,4 @@
-import { fetchMacroData, detectPhase } from "@/lib/macro"
+import { fetchMacroData, detectPhase, computeMacroScore, computeExpectationShift } from "@/lib/macro"
 import { getCrumb } from "@/lib/yahoo"
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -52,6 +52,9 @@ export async function GET() {
     equityPcr = pcr.status === "fulfilled" ? pcr.value : null
   }
 
+  const macroScore       = computeMacroScore(macroData, vix, vix9d, vix3m)
+  const expectationShift = computeExpectationShift(macroData, vix, vix9d, vix3m)
+
   return Response.json({
     ...macroData,
     detection: phase,
@@ -60,5 +63,7 @@ export async function GET() {
     vix3m,
     vvix,
     equityPcr,
+    macroScore,
+    expectationShift,
   })
 }

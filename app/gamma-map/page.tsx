@@ -22,6 +22,11 @@ type GammaMapResult = Analysis7Result & {
 const TICKERS = ["SPY", "QQQ"] as const
 type Ticker = (typeof TICKERS)[number]
 
+type MacroComponents = { growth: number; labor: number; credit: number; inflation: number; volatility: number }
+type MacroScoreData = { score: number; regime: string; volDirection: string; components: MacroComponents }
+type ExpectationShiftData = { score: number; label: string; fedBias: string; breakevens: string; yieldCurveTrend: string; shocks: string[] }
+type MacroResult = { macroScore: MacroScoreData; expectationShift: ExpectationShiftData; detection: { phase: string; confidence: number; signals: string[] }; vix: number | null; vix3m: number | null; equityPcr: number | null }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmt(n: number | null | undefined, d = 2) {
@@ -279,6 +284,8 @@ export default function GammaMapPage() {
   const [errors, setErrors]   = useState<Record<Ticker, string>>({ SPY: "", QQQ: "" })
   const [active, setActive]   = useState<Ticker>("SPY")
   const [lastUpdate, setLastUpdate] = useState("")
+  const [macro, setMacro]     = useState<MacroResult | null>(null)
+  const [macroLoading, setMacroLoading] = useState(false)
 
   function fetchTicker(t: Ticker) {
     setLoading(prev => ({ ...prev, [t]: true }))
@@ -294,8 +301,18 @@ export default function GammaMapPage() {
       .finally(() => setLoading(prev => ({ ...prev, [t]: false })))
   }
 
+  function fetchMacro() {
+    setMacroLoading(true)
+    fetch("/api/macro")
+      .then(r => r.json())
+      .then(d => setMacro(d))
+      .catch(() => null)
+      .finally(() => setMacroLoading(false))
+  }
+
   function refreshAll() {
     TICKERS.forEach(fetchTicker)
+    fetchMacro()
   }
 
   useEffect(() => { refreshAll() }, [])
@@ -614,6 +631,148 @@ export default function GammaMapPage() {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* Macro Score */}
+          {(macro || macroLoading) && (
+            <div className="border border-border bg-card rounded-lg p-4">
+              <p className="text-xs text-muted tracking-widest mb-3">MACRO SCORE — ENTORNO ECONÓMICO</p>
+
+              {macroLoading && (
+                <div className="space-y-2"><Skeleton /><Skeleton w="w-3/4" /></div>
+              )}
+
+              {macro && !macroLoading && (() => {
+                const ms = macro.macroScore
+                const es = macro.expectationShift
+                const det = macro.detection
+
+                const regimeBgMacro = ms.regime === "RISK ON"
+                  ? "bg-emerald-900/40 border-emerald-700 text-emerald-300"
+                  : ms.regime === "RISK OFF"
+                  ? "bg-red-900/40 border-red-700 text-red-300"
+                  : "bg-yellow-900/40 border-yellow-700 text-yellow-300"
+
+                const volDirCls = ms.volDirection === "EXPANDING"
+                  ? "text-red-400"
+                  : ms.volDirection === "COMPRESSING"
+                  ? "text-emerald-400"
+                  : "text-yellow-400"
+
+                const esCls = es.score > 20 ? "text-emerald-400" : es.score < -20 ? "text-red-400" : "text-yellow-400"
+
+                const componentLabels: [keyof MacroComponents, string][] = [
+                  ["growth",    "CRECIMIENTO"],
+                  ["labor",     "LABORAL"],
+                  ["credit",    "CRÉDITO"],
+                  ["inflation", "INFLACIÓN"],
+                  ["volatility","VOLATILIDAD"],
+                ]
+
+                return (
+                  <div className="space-y-4">
+                    {/* Top row */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-xs text-muted mb-1">SCORE MACRO</p>
+                        <p className={`text-3xl font-mono font-bold ${ms.score >= 60 ? "text-emerald-400" : ms.score >= 40 ? "text-yellow-400" : "text-red-400"}`}>
+                          {ms.score}<span className="text-xs text-muted">/100</span>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted mb-1">RÉGIMEN</p>
+                        <span className={`text-xs px-2 py-1 border rounded font-bold ${regimeBgMacro}`}>
+                          {ms.regime}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted mb-1">VOLATILIDAD</p>
+                        <p className={`text-sm font-bold ${volDirCls}`}>{ms.volDirection}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted mb-1">FASE ECONÓMICA</p>
+                        <p className="text-sm font-bold text-text uppercase">{det.phase}</p>
+                        <p className="text-xs text-muted">{det.confidence}% conf.</p>
+                      </div>
+                    </div>
+
+                    {/* Score bar */}
+                    <div>
+                      <div className="h-2 w-full bg-border rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${ms.score >= 60 ? "bg-emerald-500" : ms.score >= 40 ? "bg-yellow-500" : "bg-red-500"}`}
+                          style={{ width: `${ms.score}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-muted mt-0.5 font-mono">
+                        <span>0</span><span>50</span><span>100</span>
+                      </div>
+                    </div>
+
+                    {/* Component breakdown */}
+                    <div className="grid grid-cols-5 gap-2">
+                      {componentLabels.map(([key, label]) => {
+                        const v = ms.components[key]
+                        const color = v >= 65 ? "text-emerald-400" : v >= 45 ? "text-yellow-400" : "text-red-400"
+                        const barColor = v >= 65 ? "bg-emerald-500" : v >= 45 ? "bg-yellow-500" : "bg-red-500"
+                        return (
+                          <div key={key} className="text-center">
+                            <p className="text-xs text-muted tracking-wide mb-1">{label}</p>
+                            <p className={`text-lg font-mono font-bold ${color}`}>{v}</p>
+                            <div className="h-1 w-full bg-border rounded-full overflow-hidden mt-1">
+                              <div className={`h-full rounded-full ${barColor}`} style={{ width: `${v}%` }} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Expectation Shift */}
+                    <div className="border-t border-border pt-3">
+                      <p className="text-xs text-muted tracking-widest mb-2">EXPECTATION SHIFT</p>
+                      <div className="flex items-center gap-4 flex-wrap mb-2">
+                        <span className={`text-2xl font-mono font-bold ${esCls}`}>
+                          {es.score > 0 ? "+" : ""}{es.score}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 border rounded font-bold ${esCls.replace("text-", "border-").replace("400", "700")} bg-transparent`}>
+                          {es.label}
+                        </span>
+                        <div className="flex gap-3 text-xs font-mono text-muted flex-wrap">
+                          <span>Fed <span className={es.fedBias === "HAWKISH" ? "text-red-400" : es.fedBias === "DOVISH" ? "text-emerald-400" : "text-subtle"}>{es.fedBias}</span></span>
+                          <span>Breakevens <span className={es.breakevens === "RISING" ? "text-red-400" : es.breakevens === "FALLING" ? "text-emerald-400" : "text-subtle"}>{es.breakevens}</span></span>
+                          <span>Curva <span className={es.yieldCurveTrend === "STEEPENING" ? "text-emerald-400" : es.yieldCurveTrend === "FLATTENING" ? "text-red-400" : "text-subtle"}>{es.yieldCurveTrend}</span></span>
+                        </div>
+                      </div>
+                      {es.shocks.length > 0 && (
+                        <ul className="space-y-1">
+                          {es.shocks.map((s, i) => (
+                            <li key={i} className="flex gap-2 text-xs text-subtle">
+                              <span className="text-yellow-500 shrink-0">⚡</span>
+                              <span>{s}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    {/* Phase signals */}
+                    {det.signals.length > 0 && (
+                      <div className="border-t border-border pt-3">
+                        <p className="text-xs text-muted tracking-widest mb-2">SEÑALES MACRO CLAVE</p>
+                        <ul className="space-y-1">
+                          {det.signals.slice(0, 4).map((s, i) => (
+                            <li key={i} className="flex gap-2 text-xs text-subtle">
+                              <span className="text-accent shrink-0">•</span>
+                              <span>{s}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
             </div>
           )}
 

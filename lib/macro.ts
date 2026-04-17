@@ -231,6 +231,252 @@ export async function fetchMacroData(): Promise<MacroData> {
   }
 }
 
+// ── Macro Score institucional ─────────────────────────────────────────────────
+
+export type MacroScore = {
+  score:        number   // 0-100
+  regime:       "RISK ON" | "NEUTRAL" | "RISK OFF"
+  volDirection: "EXPANDING" | "STABLE" | "COMPRESSING"
+  components: {
+    growth:     number   // 0-100
+    labor:      number   // 0-100
+    credit:     number   // 0-100
+    inflation:  number   // 0-100
+    volatility: number   // 0-100
+  }
+}
+
+export type ExpectationShift = {
+  score:           number   // -100 a +100
+  label:           "HAWKISH SHOCK" | "DOVISH SHIFT" | "NEUTRAL"
+  fedBias:         "HAWKISH" | "NEUTRAL" | "DOVISH"
+  breakevens:      "RISING" | "STABLE" | "FALLING"
+  yieldCurveTrend: "STEEPENING" | "STABLE" | "FLATTENING"
+  shocks:          string[]
+}
+
+function clamp(v: number, lo = 0, hi = 100) { return Math.max(lo, Math.min(hi, v)) }
+function avg(vals: (number | null | undefined)[]): number {
+  const valid = vals.filter((v): v is number => v != null)
+  return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : 50
+}
+
+export function computeMacroScore(
+  data: MacroData,
+  vix:   number | null = null,
+  vix9d: number | null = null,
+  vix3m: number | null = null,
+): MacroScore {
+  // ── Crecimiento (20%) ──────────────────────────────────────────────────────
+  const gdpScore = (() => {
+    const v = data.gdpGrowth?.value
+    if (v == null) return null
+    const base = v < 0 ? 10 : v < 1 ? 30 : v < 1.5 ? 45 : v < 2.5 ? 65 : v < 3.5 ? 80 : 90
+    return clamp(base + (data.gdpGrowth?.trend === "up" ? 5 : data.gdpGrowth?.trend === "down" ? -8 : 0))
+  })()
+  const nfpScore = (() => {
+    const v = data.nfp?.value
+    if (v == null) return null
+    return clamp(v < -1 ? 15 : v < 0 ? 30 : v < 1 ? 50 : v < 2 ? 65 : 80)
+  })()
+  const retailScore = (() => {
+    const v = data.retailSales?.value
+    if (v == null) return null
+    return clamp(v < -2 ? 20 : v < 0 ? 35 : v < 2 ? 55 : v < 5 ? 70 : 80)
+  })()
+  const growthScore = clamp(avg([gdpScore, nfpScore, retailScore]))
+
+  // ── Mercado laboral (15%) ──────────────────────────────────────────────────
+  const unempScore = (() => {
+    const v = data.unemployment?.value
+    if (v == null) return null
+    const base = v < 3.5 ? 90 : v < 4 ? 80 : v < 5 ? 62 : v < 6 ? 42 : 20
+    return clamp(base + (data.unemployment?.trend === "down" ? 8 : data.unemployment?.trend === "up" ? -12 : 0))
+  })()
+  const claimsScore = (() => {
+    if (!data.joblessClaims) return null
+    return clamp(data.joblessClaims.trend === "down" ? 75 : data.joblessClaims.trend === "up" ? 35 : 55)
+  })()
+  const laborScore = clamp(avg([unempScore, claimsScore]))
+
+  // ── Crédito (25%) ─────────────────────────────────────────────────────────
+  const hyScore = (() => {
+    const v = data.hySpread?.value
+    if (v == null) return null
+    const base = v < 3 ? 90 : v < 3.5 ? 80 : v < 4.5 ? 62 : v < 6 ? 38 : v < 8 ? 20 : 8
+    return clamp(base + (data.hySpread?.trend === "down" ? 8 : data.hySpread?.trend === "up" ? -12 : 0))
+  })()
+  const stressScore = (() => {
+    const v = data.finStress?.value
+    if (v == null) return null
+    return clamp(v < -1 ? 88 : v < -0.5 ? 72 : v < 0 ? 60 : v < 0.5 ? 44 : v < 1 ? 28 : 12)
+  })()
+  const delinqScore = (() => {
+    const v = data.creditDelinq?.value
+    if (v == null) return null
+    return clamp(v < 2 ? 82 : v < 3 ? 64 : v < 4 ? 44 : 20)
+  })()
+  const creditScore = clamp(
+    avg([
+      hyScore    != null ? hyScore * 0.5    : null,
+      stressScore!= null ? stressScore* 0.35 : null,
+      delinqScore!= null ? delinqScore* 0.15 : null,
+    ].map((v, i) => {
+      if (v == null) return null
+      const weights = [0.5, 0.35, 0.15]
+      const raws    = [hyScore, stressScore, delinqScore]
+      return raws[i] != null ? raws[i]! : null
+    }))
+  )
+
+  // ── Inflación / Fed (20%) ──────────────────────────────────────────────────
+  const cpiScore = (() => {
+    const v = data.inflation?.value
+    if (v == null) return null
+    return clamp(v < 1 ? 55 : v < 1.5 ? 65 : v < 2 ? 80 : v < 2.5 ? 88 : v < 3 ? 72 : v < 4 ? 52 : v < 5 ? 32 : 15)
+  })()
+  const ycScore = (() => {
+    const v = data.yieldCurve?.value
+    if (v == null) return null
+    return clamp(v < -1.5 ? 8 : v < -0.5 ? 20 : v < 0 ? 35 : v < 0.5 ? 52 : v < 1.5 ? 68 : 80)
+  })()
+  const fedScore = (() => {
+    const trend = data.fedRate?.trend
+    return trend === "up" ? 38 : trend === "down" ? 62 : 55
+  })()
+  const inflationScore = clamp(avg([
+    cpiScore != null ? cpiScore * 0.3  : null,
+    ycScore  != null ? ycScore  * 0.45 : null,
+    fedScore * 0.25,
+  ].map((v, i) => {
+    const raws    = [cpiScore, ycScore, fedScore]
+    const weights = [0.3, 0.45, 0.25]
+    return raws[i] != null ? raws[i]! : null
+  })))
+
+  // ── Volatilidad (20%) ─────────────────────────────────────────────────────
+  const vixScore = (() => {
+    if (vix == null) return null
+    return clamp(vix < 12 ? 92 : vix < 15 ? 80 : vix < 18 ? 68 : vix < 22 ? 52 : vix < 28 ? 36 : vix < 35 ? 20 : 8)
+  })()
+  const termScore = (() => {
+    if (vix9d == null || vix3m == null) return null
+    return clamp(vix9d < vix3m * 0.95 ? 78 : vix9d < vix3m ? 62 : vix9d < vix3m * 1.1 ? 42 : 22)
+  })()
+  const volatilityScore = clamp(avg([vixScore, termScore, stressScore != null ? 100 - stressScore * 0.5 : null]))
+
+  // ── Score final ponderado ──────────────────────────────────────────────────
+  const weights  = [0.20, 0.15, 0.25, 0.20, 0.20]
+  const scores   = [growthScore, laborScore, creditScore, inflationScore, volatilityScore]
+  const total    = clamp(Math.round(scores.reduce((s, v, i) => s + v * weights[i], 0)))
+  const regime   = total >= 60 ? "RISK ON" : total >= 40 ? "NEUTRAL" : "RISK OFF"
+
+  // ── Dirección de volatilidad ───────────────────────────────────────────────
+  let volDirection: "EXPANDING" | "STABLE" | "COMPRESSING" = "STABLE"
+  const volSignals = [
+    vix9d != null && vix3m != null && vix9d > vix3m  ? 1 : 0,
+    data.hySpread?.trend === "up"    ? 1 : 0,
+    data.finStress?.trend === "up"   ? 1 : 0,
+  ]
+  const volCompressed = [
+    vix9d != null && vix3m != null && vix9d < vix3m * 0.95 ? 1 : 0,
+    data.hySpread?.trend === "down"  ? 1 : 0,
+    data.finStress?.trend === "down" ? 1 : 0,
+  ]
+  if (volSignals.reduce((a, b) => a + b, 0) >= 2)    volDirection = "EXPANDING"
+  else if (volCompressed.reduce((a, b) => a + b, 0) >= 2) volDirection = "COMPRESSING"
+
+  return {
+    score: total,
+    regime,
+    volDirection,
+    components: {
+      growth:     Math.round(growthScore),
+      labor:      Math.round(laborScore),
+      credit:     Math.round(creditScore),
+      inflation:  Math.round(inflationScore),
+      volatility: Math.round(volatilityScore),
+    },
+  }
+}
+
+export function computeExpectationShift(
+  data:  MacroData,
+  vix:   number | null = null,
+  vix9d: number | null = null,
+  vix3m: number | null = null,
+): ExpectationShift {
+  let score = 0
+  const shocks: string[] = []
+
+  // Fed bias ─────────────────────────────────────────────────────────────────
+  let fedBias: "HAWKISH" | "NEUTRAL" | "DOVISH" = "NEUTRAL"
+  if (data.fedRate?.trend === "up") {
+    score -= 28; fedBias = "HAWKISH"
+    shocks.push(`Fed subiendo tasas (${data.fedRate.value.toFixed(2)}%) → presión sobre activos de riesgo`)
+  } else if (data.fedRate?.trend === "down") {
+    score += 18; fedBias = "DOVISH"
+    shocks.push(`Fed recortando tasas (${data.fedRate.value.toFixed(2)}%) → estímulo monetario activo`)
+  }
+
+  // Breakevens ───────────────────────────────────────────────────────────────
+  let breakevens: "RISING" | "STABLE" | "FALLING" = "STABLE"
+  if (data.inflExp5y?.trend === "up") {
+    score -= 18; breakevens = "RISING"
+    shocks.push(`Expectativas inflación 5Y subiendo a ${data.inflExp5y.value.toFixed(2)}% — mercado desconfía de la Fed`)
+  } else if (data.inflExp5y?.trend === "down") {
+    score += 12; breakevens = "FALLING"
+  }
+
+  // Curva de tasas ───────────────────────────────────────────────────────────
+  let yieldCurveTrend: "STEEPENING" | "STABLE" | "FLATTENING" = "STABLE"
+  if (data.yieldCurve?.trend === "up") {
+    score += 18; yieldCurveTrend = "STEEPENING"
+    shocks.push(`Curva steepening (${data.yieldCurve.value.toFixed(2)}%) → expectativas de crecimiento mejorando`)
+  } else if (data.yieldCurve?.trend === "down") {
+    score -= 22; yieldCurveTrend = "FLATTENING"
+    shocks.push(`Curva aplanándose/invirtiendo (${data.yieldCurve.value.toFixed(2)}%) → mercado anticipa desaceleración`)
+  }
+
+  // HY Spread ────────────────────────────────────────────────────────────────
+  if (data.hySpread?.trend === "up") {
+    score -= 22
+    shocks.push(`HY Spread ampliándose a ${data.hySpread.value.toFixed(2)}% — apetito de riesgo cayendo`)
+  } else if (data.hySpread?.trend === "down") {
+    score += 18
+  }
+
+  // VIX term structure ───────────────────────────────────────────────────────
+  if (vix9d != null && vix3m != null) {
+    if (vix9d > vix3m * 1.05) {
+      score -= 15
+      shocks.push(`VIX near-term (${vix9d.toFixed(1)}) > VIX3M (${vix3m.toFixed(1)}) — stress de corto plazo`)
+    } else if (vix9d < vix3m * 0.92) {
+      score += 10
+    }
+  }
+
+  // Treasury 2Y (sensible a expectativas Fed) ────────────────────────────────
+  if (data.treasury2y?.trend === "up") {
+    score -= 12
+    shocks.push(`Treasury 2Y subiendo a ${data.treasury2y.value.toFixed(2)}% — mercado premia tasas altas por más tiempo`)
+  } else if (data.treasury2y?.trend === "down") {
+    score += 10
+  }
+
+  const finalScore = clamp(score, -100, 100)
+  const label = finalScore <= -35 ? "HAWKISH SHOCK" : finalScore >= 30 ? "DOVISH SHIFT" : "NEUTRAL"
+
+  return {
+    score: finalScore,
+    label,
+    fedBias,
+    breakevens,
+    yieldCurveTrend,
+    shocks: shocks.slice(0, 4),
+  }
+}
+
 // ── Detección de fase mejorada ────────────────────────────────────────────────
 export function detectPhase(data: MacroData): PhaseDetection {
   const pts: Record<Phase, number> = { recovery: 0, expansion: 0, late: 0, recession: 0 }
