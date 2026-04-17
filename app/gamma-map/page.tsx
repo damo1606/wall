@@ -14,8 +14,15 @@ type GammaLevels = {
   putCallRatio: number
 }
 
+type FlowComponents = { pcr: number; gammaDealer: number; institutional: number; m5Signal: number }
+type FlowScoreData  = { score: number; regime: string; gammaRegime: string; detections: string[]; components: FlowComponents }
+type LiquidityData  = { score: number; label: string }
+type UnifiedScore   = { score: number; classification: string; probability: number; components: { macro: number; expectations: number; positioning: number; flows: number; liquidity: number } }
+
 type GammaMapResult = Analysis7Result & {
-  gammaLevels: GammaLevels
+  gammaLevels:    GammaLevels
+  flowScore:      FlowScoreData
+  liquidityScore: LiquidityData
   availableExpirations: string[]
 }
 
@@ -66,6 +73,45 @@ function signalCls(s: string) {
   if (s === "BAJISTA")   return "text-red-400"
   if (s === "NO OPERAR") return "text-yellow-500"
   return "text-subtle"
+}
+
+function unifiedCls(score: number) {
+  if (score >= 75) return "text-emerald-400"
+  if (score >= 60) return "text-green-400"
+  if (score >= 40) return "text-yellow-400"
+  if (score >= 25) return "text-orange-400"
+  return "text-red-400"
+}
+
+function unifiedBg(score: number) {
+  if (score >= 75) return "bg-emerald-900/40 border-emerald-600 text-emerald-200"
+  if (score >= 60) return "bg-green-900/40 border-green-700 text-green-200"
+  if (score >= 40) return "bg-yellow-900/40 border-yellow-700 text-yellow-200"
+  if (score >= 25) return "bg-orange-900/40 border-orange-700 text-orange-200"
+  return "bg-red-900/40 border-red-700 text-red-200"
+}
+
+function computeUnified(gex: GammaMapResult, macro: MacroResult): UnifiedScore {
+  const n = (v: number) => Math.max(0, Math.min(100, Math.round((v + 100) / 2)))
+  const m2 = gex.contributions?.find(c => c.id === "M2")
+  const macroN       = Math.max(0, Math.min(100, Math.round(macro.macroScore.score)))
+  const expectN      = n(macro.expectationShift.score)
+  const positioningN = m2 ? n(m2.rawScore) : 50
+  const flowN        = gex.flowScore ? n(gex.flowScore.score) : 50
+  const liquidityN   = gex.liquidityScore?.score ?? 60
+  const score = Math.round(macroN * 0.25 + expectN * 0.15 + positioningN * 0.20 + flowN * 0.30 + liquidityN * 0.10)
+  const classification =
+    score >= 75 ? "AGGRESSIVE LONG" :
+    score >= 60 ? "LONG" :
+    score >= 40 ? "NEUTRAL" :
+    score >= 25 ? "SHORT" :
+    "AGGRESSIVE SHORT"
+  return {
+    score,
+    classification,
+    probability: Math.min(95, Math.round(50 + Math.abs(score - 50) * 0.8)),
+    components: { macro: macroN, expectations: expectN, positioning: positioningN, flows: flowN, liquidity: liquidityN },
+  }
 }
 
 function fearCls(f: number) {
@@ -426,6 +472,55 @@ export default function GammaMapPage() {
       {d && !isLoading && (
         <div className="space-y-4">
 
+          {/* Unified Score — output final del framework */}
+          {macro && (() => {
+            const u = computeUnified(d, macro)
+            const compRows: [string, keyof typeof u.components, number][] = [
+              ["MACRO",         "macro",        0.25],
+              ["EXPECTATIONS",  "expectations", 0.15],
+              ["POSITIONING",   "positioning",  0.20],
+              ["FLOWS",         "flows",        0.30],
+              ["LIQUIDITY",     "liquidity",    0.10],
+            ]
+            return (
+              <div className={`border rounded-lg p-4 ${unifiedBg(u.score)}`}>
+                <p className="text-xs tracking-widest opacity-70 mb-3">TOTAL SCORE — DECISIÓN OPERATIVA</p>
+                <div className="flex items-center gap-5 mb-4">
+                  <span className={`text-6xl font-mono font-bold ${unifiedCls(u.score)}`}>{u.score}</span>
+                  <div>
+                    <p className={`text-base font-bold tracking-wider ${unifiedCls(u.score)}`}>{u.classification}</p>
+                    <p className="text-xs opacity-60 font-mono mt-0.5">Probabilidad {u.probability}%</p>
+                  </div>
+                </div>
+                <div className="h-2.5 w-full bg-black/30 rounded-full overflow-hidden mb-1">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ${u.score >= 60 ? "bg-emerald-400" : u.score >= 40 ? "bg-yellow-400" : "bg-red-400"}`}
+                    style={{ width: `${u.score}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs opacity-50 font-mono mb-4">
+                  <span>0 — AGG SHORT</span><span>50 — NEUTRAL</span><span>AGG LONG — 100</span>
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {compRows.map(([label, key, weight]) => {
+                    const v = u.components[key]
+                    const bar = v >= 60 ? "bg-emerald-500" : v >= 40 ? "bg-yellow-500" : "bg-red-500"
+                    return (
+                      <div key={key} className="text-center">
+                        <p className="text-xs opacity-50 tracking-wide">{label}</p>
+                        <p className={`text-lg font-mono font-bold ${unifiedCls(v)}`}>{v}</p>
+                        <p className="text-xs opacity-40">{Math.round(weight * 100)}%</p>
+                        <div className="h-1 w-full bg-black/30 rounded-full overflow-hidden mt-1">
+                          <div className={`h-full rounded-full ${bar}`} style={{ width: `${v}%` }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })()}
+
           {/* Signal suspended */}
           {d.signalSuspended && (
             <div className="p-4 border border-yellow-700 bg-yellow-900/20 rounded-lg">
@@ -633,6 +728,84 @@ export default function GammaMapPage() {
               </ul>
             </div>
           )}
+
+          {/* Flow Score */}
+          {d.flowScore && (() => {
+            const f = d.flowScore
+            const flowCls = f.score > 20 ? "text-emerald-400" : f.score < -20 ? "text-red-400" : "text-yellow-400"
+            const compRows: [string, keyof FlowComponents][] = [
+              ["PCR",           "pcr"],
+              ["DEALER γ",      "gammaDealer"],
+              ["INSTITUCIONAL", "institutional"],
+              ["M5 SIGNAL",     "m5Signal"],
+            ]
+            return (
+              <div className="border border-border bg-card rounded-lg p-4">
+                <p className="text-xs text-muted tracking-widest mb-3">FLOWS — POSICIONAMIENTO REAL</p>
+                <div className="flex items-center gap-4 mb-4 flex-wrap">
+                  <span className={`text-4xl font-mono font-bold ${flowCls}`}>
+                    {f.score > 0 ? "+" : ""}{f.score}
+                  </span>
+                  <div className="flex gap-2 flex-wrap">
+                    <span className={`text-xs px-2 py-1 border rounded font-bold ${
+                      f.regime === "CALL DOMINANT" ? "bg-emerald-900/40 border-emerald-700 text-emerald-300" :
+                      f.regime === "PUT DOMINANT"  ? "bg-red-900/40 border-red-700 text-red-300" :
+                      "bg-gray-800 border-gray-700 text-subtle"
+                    }`}>{f.regime}</span>
+                    <span className={`text-xs px-2 py-1 border rounded font-bold ${
+                      f.gammaRegime === "POSITIVE γ"
+                        ? "bg-emerald-900/40 border-emerald-700 text-emerald-300"
+                        : "bg-red-900/40 border-red-700 text-red-300"
+                    }`}>{f.gammaRegime}</span>
+                    {d.liquidityScore && (
+                      <span className={`text-xs px-2 py-1 border rounded font-bold ${
+                        d.liquidityScore.label === "HIGH"     ? "bg-emerald-900/40 border-emerald-700 text-emerald-300" :
+                        d.liquidityScore.label === "MODERATE" ? "bg-blue-900/40 border-blue-700 text-blue-300" :
+                        d.liquidityScore.label === "LOW"      ? "bg-orange-900/40 border-orange-700 text-orange-300" :
+                        "bg-red-900/40 border-red-700 text-red-300"
+                      }`}>LIQ {d.liquidityScore.label} {d.liquidityScore.score}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Score bar */}
+                <div className="relative h-2 w-full bg-border rounded-full overflow-hidden mb-1">
+                  <div className={`h-full rounded-full transition-all duration-500 ${f.score > 20 ? "bg-emerald-500" : f.score < -20 ? "bg-red-500" : "bg-yellow-500"}`}
+                    style={{ width: `${(f.score + 100) / 2}%` }} />
+                  <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gray-600" />
+                </div>
+                <div className="flex justify-between text-xs text-muted mb-3 font-mono">
+                  <span>-100</span><span>0</span><span>+100</span>
+                </div>
+
+                {/* Components */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                  {compRows.map(([label, key]) => {
+                    const v = f.components[key]
+                    const c = v > 15 ? "text-emerald-400" : v < -15 ? "text-red-400" : "text-yellow-400"
+                    return (
+                      <div key={key} className="text-center border border-border rounded p-2 bg-surface">
+                        <p className="text-xs text-muted tracking-wide">{label}</p>
+                        <p className={`text-lg font-mono font-bold ${c}`}>{v > 0 ? "+" : ""}{v}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Detections */}
+                {f.detections.length > 0 && (
+                  <ul className="space-y-1">
+                    {f.detections.map((det, i) => (
+                      <li key={i} className="flex gap-2 text-xs text-subtle">
+                        <span className="text-blue-400 shrink-0">⟶</span>
+                        <span>{det}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Macro Score */}
           {(macro || macroLoading) && (

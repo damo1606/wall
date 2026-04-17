@@ -5,6 +5,7 @@ import { computeAnalysis3 } from "@/lib/gex3";
 import { computeAnalysis5, compute25dSkew, type ExpData5 } from "@/lib/gex5";
 import { computeSpyMetrics, computeRegime }                from "@/lib/gex6";
 import { computeAnalysis7 }                                from "@/lib/gex7";
+import { computeFlowScore, computeLiquidityScore }        from "@/lib/flows";
 import { supabaseServer }                                  from "@/lib/supabase";
 
 const HEADERS = {
@@ -208,6 +209,10 @@ export async function GET(request: NextRequest) {
     const { gexTotal: spyGexTotal, pcr: spyPcr } = computeSpyMetrics(spyCalls, spyPuts, spySpot, spyT);
     const m6 = computeRegime(vix, vix3m, vixHistory, spyGexTotal, spyPcr, spySpot, hygChange5d, spyVsSma50);
 
+    // ── Flows + Liquidity ─────────────────────────────────────────────────────
+    const flowScore      = computeFlowScore(m1, m5.score, spot);
+    const liquidityScore = computeLiquidityScore(vix, m6.fearScore);
+
     // ── M7 ────────────────────────────────────────────────────────────────────
     const result = computeAnalysis7(ticker, spot, m1, m2Result, m3Result, m5, m6);
 
@@ -276,6 +281,8 @@ export async function GET(request: NextRequest) {
         netGex:       m1.netGex,
         putCallRatio: m1.putCallRatio,
       },
+      flowScore,
+      liquidityScore,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
