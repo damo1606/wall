@@ -1,10 +1,4 @@
-// Portafolio, Lista de Seguimiento y Alertas — persistencia en localStorage
-
-const KEYS = {
-  portfolio: "descuentos-portfolio",
-  watchlist: "descuentos-watchlist2",
-  alerts:    "descuentos-alerts",
-}
+// Portafolio, Lista de Seguimiento y Alertas — persistencia en Supabase via API routes
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -57,98 +51,141 @@ export type AlertCheckInput = {
   discountToGraham?: number
 }
 
-// ─── Helpers de lectura / escritura ──────────────────────────────────────────
-
-function read<T>(key: string): T[] {
-  if (typeof window === "undefined") return []
-  try { return JSON.parse(localStorage.getItem(key) ?? "[]") } catch { return [] }
-}
-
-function write<T>(key: string, data: T[]) {
-  if (typeof window === "undefined") return
-  localStorage.setItem(key, JSON.stringify(data))
-}
+export const WATCH_LIMIT = 15
 
 // ─── Portafolio ───────────────────────────────────────────────────────────────
 
-export function getPortfolio(): PortfolioEntry[] {
-  return read<PortfolioEntry>(KEYS.portfolio)
+export async function getPortfolio(): Promise<PortfolioEntry[]> {
+  try {
+    const res = await fetch("/api/portfolio")
+    if (!res.ok) return []
+    const rows = await res.json()
+    return rows.map((r: any): PortfolioEntry => ({
+      id:       r.id,
+      symbol:   r.symbol,
+      company:  r.company ?? "",
+      qty:      Number(r.qty),
+      buyPrice: Number(r.buy_price),
+      buyDate:  r.buy_date ?? "",
+      notes:    r.notes ?? undefined,
+    }))
+  } catch { return [] }
 }
 
-export function addPosition(entry: Omit<PortfolioEntry, "id">): PortfolioEntry {
-  const item: PortfolioEntry = { ...entry, id: `${entry.symbol}-${Date.now()}` }
-  write(KEYS.portfolio, [...getPortfolio(), item])
-  return item
+export async function addPosition(entry: Omit<PortfolioEntry, "id">): Promise<PortfolioEntry> {
+  const res = await fetch("/api/portfolio", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({
+      symbol:    entry.symbol,
+      company:   entry.company,
+      qty:       entry.qty,
+      buy_price: entry.buyPrice,
+      buy_date:  entry.buyDate || null,
+      notes:     entry.notes,
+    }),
+  })
+  const row = await res.json()
+  return { id: row.id, symbol: row.symbol, company: row.company ?? "", qty: Number(row.qty), buyPrice: Number(row.buy_price), buyDate: row.buy_date ?? "", notes: row.notes }
 }
 
-export function removePosition(id: string) {
-  write(KEYS.portfolio, getPortfolio().filter(e => e.id !== id))
+export async function removePosition(id: string): Promise<void> {
+  await fetch(`/api/portfolio?id=${id}`, { method: "DELETE" })
 }
 
 // ─── Lista de Seguimiento ─────────────────────────────────────────────────────
 
-export function getWatchEntries(): WatchEntry[] {
-  return read<WatchEntry>(KEYS.watchlist)
+export async function getWatchEntries(): Promise<WatchEntry[]> {
+  try {
+    const res = await fetch("/api/watchlist")
+    if (!res.ok) return []
+    const rows = await res.json()
+    return rows.map((r: any): WatchEntry => ({
+      symbol:      r.symbol,
+      company:     r.company ?? "",
+      addedAt:     r.added_at?.slice(0, 10) ?? "",
+      targetPrice: r.target_price ? Number(r.target_price) : undefined,
+      notes:       r.notes ?? undefined,
+    }))
+  } catch { return [] }
 }
 
-export const WATCH_LIMIT = 15
-
-export function isWatchFull(): boolean {
-  return getWatchEntries().length >= WATCH_LIMIT
+export async function addWatch(entry: Omit<WatchEntry, "addedAt">): Promise<WatchEntry> {
+  const res = await fetch("/api/watchlist", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ symbol: entry.symbol, company: entry.company, target_price: entry.targetPrice, notes: entry.notes }),
+  })
+  const row = await res.json()
+  return { symbol: row.symbol, company: row.company ?? "", addedAt: row.added_at?.slice(0, 10) ?? "", targetPrice: row.target_price ? Number(row.target_price) : undefined }
 }
 
-export function addWatch(entry: Omit<WatchEntry, "addedAt">): WatchEntry {
-  const item: WatchEntry = { ...entry, addedAt: new Date().toISOString().slice(0, 10) }
-  const existing = getWatchEntries()
-  if (existing.find(e => e.symbol === entry.symbol)) return item // ya existe
-  if (existing.length >= WATCH_LIMIT) return item               // límite alcanzado
-  write(KEYS.watchlist, [...existing, item])
-  return item
+export async function removeWatch(symbol: string): Promise<void> {
+  await fetch(`/api/watchlist?symbol=${symbol}`, { method: "DELETE" })
 }
 
-export function removeWatch(symbol: string) {
-  write(KEYS.watchlist, getWatchEntries().filter(e => e.symbol !== symbol))
-}
-
-export function isWatching(symbol: string): boolean {
-  return getWatchEntries().some(e => e.symbol === symbol)
+export async function isWatching(symbol: string): Promise<boolean> {
+  const list = await getWatchEntries()
+  return list.some(e => e.symbol === symbol)
 }
 
 // ─── Alertas ──────────────────────────────────────────────────────────────────
 
-export function getAlerts(): Alert[] {
-  return read<Alert>(KEYS.alerts)
+export async function getAlerts(): Promise<Alert[]> {
+  try {
+    const res = await fetch("/api/alerts")
+    if (!res.ok) return []
+    const rows = await res.json()
+    return rows.map((r: any): Alert => ({
+      id:          r.id,
+      symbol:      r.symbol,
+      type:        r.type as AlertType,
+      threshold:   Number(r.threshold ?? 0),
+      label:       r.label ?? "",
+      active:      r.active ?? true,
+      triggered:   r.triggered ?? false,
+      triggeredAt: r.triggered_at?.slice(0, 10),
+      createdAt:   r.created_at?.slice(0, 10) ?? "",
+    }))
+  } catch { return [] }
 }
 
-export function addAlert(alert: Omit<Alert, "id" | "triggered" | "createdAt">): Alert {
-  const item: Alert = {
-    ...alert,
-    id: `${alert.symbol}-${alert.type}-${Date.now()}`,
-    triggered: false,
-    createdAt: new Date().toISOString().slice(0, 10),
-  }
-  write(KEYS.alerts, [...getAlerts(), item])
-  return item
+export async function addAlert(alert: Omit<Alert, "id" | "triggered" | "createdAt">): Promise<Alert> {
+  const res = await fetch("/api/alerts", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ symbol: alert.symbol, type: alert.type, label: alert.label, threshold: alert.threshold }),
+  })
+  const row = await res.json()
+  return { id: row.id, symbol: row.symbol, type: row.type, threshold: Number(row.threshold ?? 0), label: row.label ?? "", active: row.active ?? true, triggered: false, createdAt: row.created_at?.slice(0, 10) ?? "" }
 }
 
-export function removeAlert(id: string) {
-  write(KEYS.alerts, getAlerts().filter(a => a.id !== id))
+export async function removeAlert(id: string): Promise<void> {
+  await fetch(`/api/alerts?id=${id}`, { method: "DELETE" })
 }
 
-export function toggleAlertActive(id: string) {
-  write(KEYS.alerts, getAlerts().map(a => a.id === id ? { ...a, active: !a.active } : a))
+export async function toggleAlertActive(id: string, current: boolean): Promise<void> {
+  await fetch(`/api/alerts?id=${id}`, {
+    method:  "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ active: !current }),
+  })
 }
 
-export function markTriggered(id: string) {
-  write(KEYS.alerts, getAlerts().map(a =>
-    a.id === id ? { ...a, triggered: true, triggeredAt: new Date().toISOString().slice(0, 10) } : a
-  ))
+export async function markTriggered(id: string): Promise<void> {
+  await fetch(`/api/alerts?id=${id}`, {
+    method:  "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ triggered: true, triggered_at: new Date().toISOString() }),
+  })
 }
 
-export function resetAlert(id: string) {
-  write(KEYS.alerts, getAlerts().map(a =>
-    a.id === id ? { ...a, triggered: false, triggeredAt: undefined } : a
-  ))
+export async function resetAlert(id: string): Promise<void> {
+  await fetch(`/api/alerts?id=${id}`, {
+    method:  "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ triggered: false, triggered_at: null }),
+  })
 }
 
 // ─── Verificar alertas ────────────────────────────────────────────────────────
