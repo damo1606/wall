@@ -282,7 +282,7 @@ export async function fetchStockData(symbol: string, calendar = false): Promise<
     const stats     = r.defaultKeyStatistics ?? {}
     const financial = r.financialData       ?? {}
     const price     = r.price               ?? {}
-    const calendar  = r.calendarEvents      ?? {}
+    const calEv     = r.calendarEvents      ?? {}
 
     const currentPrice = financial.currentPrice?.raw   ?? summary.regularMarketPrice?.raw ?? 0
     const high52w      = summary.fiftyTwoWeekHigh?.raw ?? 0
@@ -455,7 +455,7 @@ export async function fetchStockData(symbol: string, calendar = false): Promise<
       compositeScore,
 
       earningsDate: (() => {
-        const dates: { raw?: number; fmt?: string }[] = calendar.earnings?.earningsDate ?? []
+        const dates: { raw?: number; fmt?: string }[] = calEv.earnings?.earningsDate ?? []
         const next = dates.find(d => d.raw && d.raw * 1000 > Date.now())
         return next?.fmt ?? dates[0]?.fmt ?? undefined
       })(),
