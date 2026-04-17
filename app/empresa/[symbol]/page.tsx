@@ -193,6 +193,7 @@ export default function EmpresaPage() {
   const [actionDone, setActionDone]   = useState<string | null>(null)
   const [fetchedAt,  setFetchedAt]    = useState<string | null>(null)
   const [news,       setNews]         = useState<{ title: string; publisher: string; link: string; publishedAt: string }[]>([])
+  const [ivData,     setIvData]       = useState<{ atmIv: number; ivRank: number | null; ivPercentile: number | null; samples: number } | null>(null)
 
   useEffect(() => {
     setInPortfolio(getPortfolio().some(e => e.symbol === symbol))
@@ -229,6 +230,13 @@ export default function EmpresaPage() {
       .catch(err => { if (err.name !== "AbortError") setError(true) })
       .finally(() => setLoading(false))
     return () => controller.abort()
+  }, [symbol])
+
+  useEffect(() => {
+    fetch(`/api/iv?ticker=${symbol}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.atmIv) setIvData(d) })
+      .catch(() => {})
   }, [symbol])
 
   if (loading) return (
@@ -345,6 +353,18 @@ export default function EmpresaPage() {
           >
             Ver Opciones →
           </Link>
+          {ivData && (
+            <span className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${
+              ivData.atmIv >= 40 ? "bg-red-900/40 border-red-700 text-red-300" :
+              ivData.atmIv >= 20 ? "bg-yellow-900/40 border-yellow-700 text-yellow-300" :
+              "bg-green-900/40 border-green-700 text-green-300"
+            }`}>
+              IV {ivData.atmIv.toFixed(1)}%
+              {ivData.ivRank != null && ivData.samples >= 5
+                ? ` · IVR ${ivData.ivRank}`
+                : " · acumulando"}
+            </span>
+          )}
           {actionDone && (
             <span className="text-sm text-green-400 px-3 py-1.5">{actionDone}</span>
           )}

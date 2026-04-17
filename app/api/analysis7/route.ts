@@ -140,8 +140,15 @@ export async function GET(request: NextRequest) {
 
     if (expDataList.length === 0) return NextResponse.json({ error: "No valid expiration data" }, { status: 400 });
 
-    // ── M1 ────────────────────────────────────────────────────────────────────
+    // ── ATM IV ────────────────────────────────────────────────────────────────
     const { calls: primaryCalls, puts: primaryPuts } = parseChain(firstOptData);
+    const nearCall = [...primaryCalls].sort((a, b) => Math.abs(a.strike - spot) - Math.abs(b.strike - spot))[0]
+    const nearPut  = [...primaryPuts ].sort((a, b) => Math.abs(a.strike - spot) - Math.abs(b.strike - spot))[0]
+    const cIv = (nearCall?.impliedVolatility ?? 0) * 100
+    const pIv = (nearPut?.impliedVolatility  ?? 0) * 100
+    const atmIv = parseFloat(((cIv > 0 && pIv > 0) ? (cIv + pIv) / 2 : cIv || pIv).toFixed(1))
+
+    // ── M1 ────────────────────────────────────────────────────────────────────
     const m1 = computeAnalysis(ticker, spot, primaryExpDate.date, availableExpirations, primaryCalls, primaryPuts);
 
     // ── Skew 25Δ ──────────────────────────────────────────────────────────────
@@ -253,6 +260,7 @@ export async function GET(request: NextRequest) {
         m7_regime_multiplier:      result.regimeMultiplier,
         m7_sr_table:               result.srTable,
         m7_timing_matrix:          result.timingMatrix,
+        atm_iv:                    atmIv > 0 ? atmIv : null,
       })
 ;
 

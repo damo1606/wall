@@ -155,6 +155,16 @@ function GexContent() {
   }, []);
 
   const [introOpen, setIntroOpen] = useState(false);
+  const [ivData, setIvData] = useState<{ atmIv: number; ivRank: number | null; ivPercentile: number | null; samples: number } | null>(null);
+
+  useEffect(() => {
+    if (analyzeKey === 0 || !ticker) return;
+    setIvData(null);
+    fetch(`/api/iv?ticker=${ticker}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d?.atmIv ? setIvData(d) : null)
+      .catch(() => null);
+  }, [analyzeKey, ticker]);
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -245,6 +255,29 @@ function GexContent() {
             <span className="text-xs text-muted hidden sm:block">
               {ticker}{expiration ? ` · ${expiration}` : ""} · {expirations.length} vencimientos
             </span>
+          )}
+          {ivData && (
+            <div className="hidden sm:flex items-center gap-2 text-xs ml-auto">
+              <span className="text-muted tracking-widest">IV ATM</span>
+              <span className={`font-bold px-2 py-0.5 tracking-widest ${
+                ivData.atmIv > 40 ? "bg-red-900/40 text-red-400 border border-red-800" :
+                ivData.atmIv < 20 ? "bg-green-900/40 text-green-400 border border-green-800" :
+                "bg-yellow-900/40 text-yellow-400 border border-yellow-800"
+              }`}>
+                {ivData.atmIv.toFixed(1)}%
+              </span>
+              {ivData.ivRank !== null ? (
+                <>
+                  <span className="text-muted">RANK</span>
+                  <span className={`font-bold ${ivData.ivRank > 50 ? "text-red-400" : "text-green-400"}`}>
+                    {ivData.ivRank}%
+                  </span>
+                  <span className="text-muted/40">({ivData.samples}d)</span>
+                </>
+              ) : (
+                <span className="text-muted/40 italic">acumulando historial</span>
+              )}
+            </div>
           )}
         </div>
       </div>
