@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCrumb } from "@/lib/yahoo";
+import { getCrumb, fetchStockData } from "@/lib/yahoo";
+import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS } from "@/lib/symbols";
 import { computeAnalysis } from "@/lib/gex";
 import { computeAnalysis2 } from "@/lib/gex2";
 import { computeAnalysis3 } from "@/lib/gex3";
@@ -286,19 +287,19 @@ export async function GET(request: NextRequest) {
   const limit       = Math.min(parseInt(searchParams.get("limit") ?? "20"), 30);
   const minBuyScore = parseInt(searchParams.get("minBuyScore") ?? "50");
 
-  // 1. Fetch fundamental screener
-  let fundamentals: any[] = [];
-  try {
-    const base = new URL(request.url);
-    const res = await fetch(
-      `${base.origin}/api/screener?universe=${universe}&limit=${limit}`,
-      { cache: "no-store" }
-    );
-    if (!res.ok) throw new Error("Screener fetch failed");
-    fundamentals = (await res.json()).stocks ?? [];
-  } catch (e: any) {
-    return NextResponse.json({ error: `Screener error: ${e.message}` }, { status: 500 });
-  }
+  // 1. Fetch fundamental screener (directo, sin HTTP interno)
+  const symbols = (
+    universe === "dia"     ? DJIA_SYMBOLS :
+    universe === "nasdaq"  ? NASDAQ100_SYMBOLS :
+    universe === "russell" ? RUSSELL_SYMBOLS :
+    SP500_SYMBOLS
+  ).slice(0, limit);
+
+  const screenerResults = await Promise.allSettled(symbols.map(s => fetchStockData(s)));
+  const fundamentals: any[] = screenerResults
+    .filter((r): r is PromiseFulfilledResult<NonNullable<Awaited<ReturnType<typeof fetchStockData>>>> =>
+      r.status === "fulfilled" && r.value !== null)
+    .map(r => r.value);
 
   // 2. Score + filter
   const { scoreStock } = await import("@/lib/scoring");
