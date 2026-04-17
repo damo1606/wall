@@ -22,6 +22,7 @@ const ACCIONES: NavPage[] = [
 ]
 
 const OPCIONES: NavPage[] = [
+  { href: "/gamma-map",      label: "Gamma Map" },
   { href: "/gex",            label: "GEX" },
   { href: "/scanner",        label: "Scanner" },
   { href: "/rotacion",       label: "Rotación" },

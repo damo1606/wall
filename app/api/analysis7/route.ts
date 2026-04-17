@@ -264,7 +264,19 @@ export async function GET(request: NextRequest) {
       })
 ;
 
-    return NextResponse.json({ ...result, srTable: enrichedSrTable, availableExpirations });
+    return NextResponse.json({
+      ...result,
+      srTable: enrichedSrTable,
+      availableExpirations,
+      gammaLevels: {
+        callWall:     m1.levels.callWall,
+        putWall:      m1.levels.putWall,
+        gammaFlip:    m1.levels.gammaFlip,
+        maxPain:      m5.maxPain,
+        netGex:       m1.netGex,
+        putCallRatio: m1.putCallRatio,
+      },
+    });
   } catch (e: any) {
     return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
   }
