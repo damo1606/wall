@@ -236,7 +236,7 @@ export default function EmpresaPage() {
     fetch(`/api/iv?ticker=${symbol}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.atmIv) setIvData(d) })
-      .catch(() => {})
+      .catch(e => console.error('[IV] fetch failed:', e))
   }, [symbol])
 
   if (loading) return (
@@ -353,7 +353,7 @@ export default function EmpresaPage() {
           >
             Ver Opciones →
           </Link>
-          {ivData && (
+          {ivData ? (
             <span className={`text-xs font-bold px-3 py-1.5 rounded-lg border ${
               ivData.atmIv >= 40 ? "bg-red-900/40 border-red-700 text-red-300" :
               ivData.atmIv >= 20 ? "bg-yellow-900/40 border-yellow-700 text-yellow-300" :
@@ -363,6 +363,10 @@ export default function EmpresaPage() {
               {ivData.ivRank != null && ivData.samples >= 5
                 ? ` · IVR ${ivData.ivRank}`
                 : " · acumulando"}
+            </span>
+          ) : (
+            <span className="text-xs px-3 py-1.5 rounded-lg border border-gray-700 text-gray-500">
+              IV no disponible
             </span>
           )}
           {actionDone && (

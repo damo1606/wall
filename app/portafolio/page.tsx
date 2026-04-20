@@ -230,6 +230,7 @@ export default function PortafolioPage() {
   const [watchSort, setWatchSort] = useState<WatchSortCol>("buyscore")
   const [watchDir, setWatchDir]   = useState<"asc" | "desc">("desc")
   const [savedSignals, setSavedSignals] = useState<Record<string, string>>({})
+  const [isLoggedIn, setIsLoggedIn]   = useState<boolean | null>(null)
 
   function handlePortSort(col: PortSortCol) {
     if (portSort === col) setPortDir(d => d === "desc" ? "asc" : "desc")
@@ -252,7 +253,10 @@ export default function PortafolioPage() {
 
   // Cargar desde Supabase al montar
   useEffect(() => {
-    reload()
+    fetch("/api/portfolio").then(r => {
+      setIsLoggedIn(r.status !== 401)
+      if (r.status !== 401) reload()
+    }).catch(() => setIsLoggedIn(false))
     try {
       const saved = JSON.parse(localStorage.getItem("wall_watchlist_state") ?? "{}")
       setSavedSignals(saved)
@@ -426,8 +430,19 @@ export default function PortafolioPage() {
             {portfolio.length === 0 ? (
               <div className="text-center py-20 text-gray-600">
                 <div className="text-4xl mb-3">📊</div>
-                <p>No tienes posiciones registradas.</p>
-                <p className="text-sm mt-1">Agrega tu primera posición con el botón de arriba.</p>
+                {isLoggedIn === false ? (
+                  <>
+                    <p>Inicia sesión para ver tu portafolio.</p>
+                    <a href="/login" className="inline-block mt-3 px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold transition-colors">
+                      Iniciar sesión
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    <p>No tienes posiciones registradas.</p>
+                    <p className="text-sm mt-1">Agrega tu primera posición con el botón de arriba.</p>
+                  </>
+                )}
               </div>
             ) : (
               <div className="overflow-x-auto">

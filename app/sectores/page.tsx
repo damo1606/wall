@@ -405,14 +405,19 @@ export default function Sectores() {
   const [active, setActive] = useState("tech")
   const [etfs,   setEtfs]   = useState<EtfData[]>([])
   const [loading, setLoading] = useState(true)
+  const [etfError, setEtfError] = useState(false)
 
-  useEffect(() => {
+  function fetchEtfs() {
+    setLoading(true)
+    setEtfError(false)
     fetch("/api/sectors-etf")
       .then(r => r.json())
-      .then(d => { if (d?.etfs) setEtfs(d.etfs) })
-      .catch(() => {})
+      .then(d => { if (d?.etfs) setEtfs(d.etfs); else setEtfError(true) })
+      .catch(() => setEtfError(true))
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { fetchEtfs() }, [])
 
   const sector  = SECTORS.find(s => s.key === active)!
   const etfData = etfs.find(e => e.sector === ETF_MAP[active]) ?? null
@@ -576,7 +581,10 @@ export default function Sectores() {
                   </p>
                 </>
               ) : !loading ? (
-                <p className="text-xs text-gray-600">No se pudo obtener datos del ETF {ETF_SYMBOL[active]}.</p>
+                <div className="text-xs text-gray-600 flex items-center gap-3">
+                  <span>No se pudo cargar el análisis del ETF {ETF_SYMBOL[active]}.</span>
+                  <button onClick={fetchEtfs} className="text-blue-400 hover:text-blue-300 underline transition-colors">Reintentar</button>
+                </div>
               ) : null}
             </div>
 

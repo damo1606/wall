@@ -11,7 +11,7 @@ const ACCIONES: NavPage[] = [
   { href: "/ciclos",      label: "Ciclos",       exact: true },
   { href: "/sectores",    label: "Sectores",     exact: true },
   { href: "/",            label: "Screener",     exact: true },
-  { href: "/parte1",      label: "Valoración",   exact: true },
+  { href: "/valoracion",  label: "Valoración",   exact: true },
   { href: "/prospectiva", label: "Prospectiva",  exact: true },
   { href: "/portafolio",  label: "Portafolio",   exact: true },
   { href: "/senales",     label: "Señales",      exact: true },
