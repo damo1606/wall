@@ -14,6 +14,7 @@ import { COTPanel } from '@/components/MacroFX/COTPanel'
 const STORAGE_KEY = 'macro-fx-state'
 
 type Tab = 'resumen' | 'datos'
+type FredActuals = Partial<Record<Currency, Partial<Record<MacroIndicator, string>>>>
 
 interface ComputedState {
   scores: Record<Currency, CurrencyScore>
@@ -35,6 +36,22 @@ function saveToStorage(inputs: MacroInput, cotData: COTData) {
   } catch {}
 }
 
+function mergeFred(inputs: MacroInput, fred: FredActuals): MacroInput {
+  const result = { ...inputs } as MacroInput
+  for (const [c, indicators] of Object.entries(fred)) {
+    for (const [ind, val] of Object.entries(indicators!)) {
+      const cur = result[c as Currency][ind as MacroIndicator]
+      if (!cur.actual && val) {
+        result[c as Currency] = {
+          ...result[c as Currency],
+          [ind]: { ...cur, actual: val },
+        }
+      }
+    }
+  }
+  return result
+}
+
 export default function MacroFXPage() {
   const [tab, setTab] = useState<Tab>('resumen')
   const [inputs, setInputs] = useState<MacroInput>(emptyInputs)
@@ -42,6 +59,7 @@ export default function MacroFXPage() {
   const [computed, setComputed] = useState<ComputedState | null>(null)
   const [threshold, setThreshold] = useState(6)
   const [loading, setLoading] = useState(false)
+  const [fredActuals, setFredActuals] = useState<FredActuals>({})
 
   useEffect(() => {
     const saved = loadFromStorage()
@@ -49,6 +67,18 @@ export default function MacroFXPage() {
       setInputs(saved.inputs)
       setCotData(saved.cotData)
     }
+
+    fetch('/api/macro-fx/fred')
+      .then(r => r.ok ? r.json() : null)
+      .then((fred: FredActuals | null) => {
+        if (!fred) return
+        setFredActuals(fred)
+        setInputs(prev => {
+          const saved = loadFromStorage()
+          return mergeFred(saved?.inputs ?? prev, fred)
+        })
+      })
+      .catch(() => {})
   }, [])
 
   const handleInputChange = useCallback(
@@ -145,7 +175,7 @@ export default function MacroFXPage() {
 
       {tab === 'datos' && (
         <div className="flex flex-col gap-4">
-          <MacroInputGrid inputs={inputs} onChange={handleInputChange} />
+          <MacroInputGrid inputs={inputs} onChange={handleInputChange} fredActuals={fredActuals} />
           <COTPanel cotData={cotData} onUpdate={handleCOTUpdate} />
           <div className="flex justify-end">
             <button
