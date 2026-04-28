@@ -19,6 +19,7 @@ const ACCIONES: NavPage[] = [
   { href: "/comparar",   label: "Comparar",     exact: true },
   { href: "/dashboard",  label: "Dashboard",    exact: true },
   { href: "/diario",     label: "Diario",       exact: true },
+  { href: "/macro-fx",  label: "Macro FX",     exact: true },
 ]
 
 const OPCIONES: NavPage[] = [

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, Fragment } from "react"
 import Link from "next/link"
 import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
@@ -41,6 +41,16 @@ function SignalBadge({ signal }: { signal: string }) {
     signal === "Venta"         ? { cls: "bg-orange-600 text-white",  icon: "▼"  } :
                                  { cls: "bg-red-700 text-white",     icon: "▼▼" }
   return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.cls}`}>{s.icon} {signal}</span>
+}
+
+function ConfidenceBadge({ score }: { score: ScoreBreakdown }) {
+  const count = [score.capitalScore, score.moatScore, score.healthScore, score.priceScore]
+    .filter(s => s >= 60).length
+  const { label, cls } =
+    count >= 4 ? { label: "★★★ Alta",  cls: "bg-emerald-900/40 text-emerald-400 border border-emerald-700" } :
+    count >= 2 ? { label: "★★☆ Media", cls: "bg-blue-900/30 text-blue-400 border border-blue-700" } :
+               { label: "★☆☆ Baja",   cls: "bg-gray-800 text-gray-500 border border-gray-700" }
+  return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}`}>{label}</span>
 }
 
 function heatRow(buyScore: number | undefined): string {
@@ -231,6 +241,7 @@ export default function PortafolioPage() {
   const [watchDir, setWatchDir]   = useState<"asc" | "desc">("desc")
   const [savedSignals, setSavedSignals] = useState<Record<string, string>>({})
   const [isLoggedIn, setIsLoggedIn]   = useState<boolean | null>(null)
+  const [expandedRow, setExpandedRow] = useState<string | null>(null)
 
   function handlePortSort(col: PortSortCol) {
     if (portSort === col) setPortDir(d => d === "desc" ? "asc" : "desc")
@@ -472,7 +483,8 @@ export default function PortafolioPage() {
                   </thead>
                   <tbody>
                     {portfolioSorted.map(e => (
-                      <tr key={e.id} className="border-b border-gray-800/50 hover:bg-gray-900/50">
+                      <Fragment key={e.id}>
+                      <tr className={`border-b border-gray-800/50 hover:bg-gray-900/50 ${expandedRow === e.id ? "bg-gray-900/50" : ""}`}>
                         <td className="py-3 pr-6">
                           <Link href={`/empresa/${e.symbol}`} className="hover:opacity-80">
                             <div className="font-bold text-white">{e.symbol}</div>
@@ -506,10 +518,53 @@ export default function PortafolioPage() {
                         </td>
                         <td className="py-3 pr-4 text-xs text-gray-600">{e.buyDate}</td>
                         <td className="py-3">
-                          <button onClick={async () => { await removePosition(e.id); setPortfolio(await getPortfolio()) }}
-                            className="text-gray-700 hover:text-red-400 transition-colors text-lg leading-none">✕</button>
+                          <div className="flex items-center gap-2">
+                            {e.live && (
+                              <button onClick={() => setExpandedRow(expandedRow === e.id ? null : e.id)}
+                                className="text-gray-600 hover:text-gray-300 transition-colors text-xs">
+                                {expandedRow === e.id ? "▲" : "▼"}
+                              </button>
+                            )}
+                            <button onClick={async () => { await removePosition(e.id); setPortfolio(await getPortfolio()) }}
+                              className="text-gray-700 hover:text-red-400 transition-colors text-lg leading-none">✕</button>
+                          </div>
                         </td>
                       </tr>
+                      {expandedRow === e.id && e.live && (
+                        <tr>
+                          <td colSpan={11} className="bg-gray-900/80 px-6 pb-4 pt-2 border-b border-gray-800/50">
+                            <div className="flex items-center gap-3 mb-3">
+                              <span className="text-xs text-gray-500 font-semibold">Desglose de score</span>
+                              <ConfidenceBadge score={e.live.score} />
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                              {([
+                                { label: "Capital Efficiency", key: "capitalScore" as const, weight: "30%" },
+                                { label: "Competitive Moat",   key: "moatScore"   as const, weight: "30%" },
+                                { label: "Financial Health",   key: "healthScore" as const, weight: "20%" },
+                                { label: "Valuation",          key: "priceScore"  as const, weight: "20%" },
+                              ]).map(({ label, key, weight }) => {
+                                const v = e.live!.score[key]
+                                const color = v >= 70 ? "text-emerald-400" : v >= 50 ? "text-blue-400" : v >= 35 ? "text-amber-400" : "text-red-400"
+                                const bar   = v >= 70 ? "bg-emerald-500"   : v >= 50 ? "bg-blue-500"   : v >= 35 ? "bg-amber-500"   : "bg-red-500"
+                                return (
+                                  <div key={key} className="bg-gray-800/60 rounded-lg p-3">
+                                    <div className="flex justify-between items-center mb-1">
+                                      <span className="text-[11px] text-gray-400">{label}</span>
+                                      <span className="text-[10px] text-gray-600">{weight}</span>
+                                    </div>
+                                    <div className={`text-lg font-bold font-mono ${color}`}>{v}</div>
+                                    <div className="h-1 bg-gray-700 rounded-full mt-2 overflow-hidden">
+                                      <div className={`h-full rounded-full ${bar}`} style={{ width: `${v}%` }} />
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
