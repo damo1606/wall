@@ -5,48 +5,64 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "./ThemeProvider"
 
-type NavPage = { href: string; label: string; exact?: true }
+type NavPage = { href: string; label: string }
 
 const ACCIONES: NavPage[] = [
-  { href: "/ciclos",      label: "Ciclos",       exact: true },
-  { href: "/sectores",    label: "Sectores",     exact: true },
-  { href: "/",            label: "Screener",     exact: true },
-  { href: "/valoracion",  label: "Valoración",   exact: true },
-  { href: "/prospectiva", label: "Prospectiva",  exact: true },
-  { href: "/portafolio",  label: "Portafolio",   exact: true },
-  { href: "/senales",     label: "Señales",      exact: true },
-  { href: "/scanner-pro", label: "Scanner Pro",  exact: true },
-  { href: "/comparar",   label: "Comparar",     exact: true },
-  { href: "/dashboard",  label: "Dashboard",    exact: true },
-  { href: "/diario",     label: "Diario",       exact: true },
-  { href: "/macro-fx",  label: "Macro FX",     exact: true },
+  { href: "/screener",     label: "Screener" },
+  { href: "/valoracion",   label: "Valoración" },
+  { href: "/ciclos",       label: "Ciclos" },
+  { href: "/sectores",     label: "Sectores" },
+  { href: "/senales",      label: "Señales" },
+  { href: "/comparar",     label: "Comparar" },
+  { href: "/prospectiva",  label: "Prospectiva" },
+  { href: "/diario",       label: "Diario" },
+  { href: "/dashboard",    label: "Dashboard" },
 ]
 
-const OPCIONES: NavPage[] = [
-  { href: "/gamma-map",      label: "Gamma Map" },
-  { href: "/gex",            label: "GEX" },
-  { href: "/scanner",        label: "Scanner" },
-  { href: "/rotacion",       label: "Rotación" },
-  { href: "/gex/portafolio", label: "Portafolio" },
+const INSTITUCIONAL: NavPage[] = [
+  { href: "/gex",          label: "GEX" },
+  { href: "/gamma-map",    label: "Gamma Map" },
+  { href: "/scanner",      label: "Scanner" },
+  { href: "/scanner-pro",  label: "Scanner Pro" },
+  { href: "/rotacion",     label: "Rotación" },
 ]
 
-const OPCIONES_PREFIXES = OPCIONES.map(p => p.href)
+const ACCIONES_PREFIXES    = ACCIONES.map(p => p.href)
+const INSTITUCIONAL_PREFIXES = INSTITUCIONAL.map(p => p.href)
 
-function isOpcionesPath(path: string) {
-  return OPCIONES_PREFIXES.some(p => path === p || path.startsWith(p + "/"))
+function isInSection(path: string, prefixes: string[]) {
+  return prefixes.some(p => path === p || path.startsWith(p + "/"))
 }
 
-function NavItem({ href, label, active }: { href: string; label: string; active: boolean }) {
-  return (
-    <Link href={href} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-      active ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/60"
-    }`}>
-      {label}
-    </Link>
-  )
-}
+const ChevronIcon = ({ open }: { open: boolean }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="11" height="11"
+    viewBox="0 0 24 24"
+    fill="none" stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round" strokeLinejoin="round"
+    className={`transition-transform ${open ? "rotate-180" : ""}`}
+  >
+    <path d="m6 9 6 6 6-6"/>
+  </svg>
+)
 
-function OpcionesDropdown({ inOpciones, pathname }: { inOpciones: boolean; pathname: string }) {
+function NavDropdown({
+  label,
+  pages,
+  active,
+  pathname,
+  accentActive,
+  accentHover,
+}: {
+  label: string
+  pages: NavPage[]
+  active: boolean
+  pathname: string
+  accentActive: string
+  accentHover: string
+}) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -63,38 +79,24 @@ function OpcionesDropdown({ inOpciones, pathname }: { inOpciones: boolean; pathn
       <button
         onClick={() => setOpen(v => !v)}
         className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
-          inOpciones
-            ? "bg-emerald-800 text-emerald-200"
-            : "text-emerald-600 hover:text-emerald-400 hover:bg-gray-800/60"
+          active ? accentActive : `text-gray-400 hover:text-gray-200 hover:bg-gray-800/60 ${accentHover}`
         }`}
       >
-        <span className="font-semibold">Opciones</span>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="12" height="12"
-          viewBox="0 0 24 24"
-          fill="none" stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round" strokeLinejoin="round"
-          className={`transition-transform ${open ? "rotate-180" : ""}`}
-        >
-          <path d="m6 9 6 6 6-6"/>
-        </svg>
+        {label}
+        <ChevronIcon open={open} />
       </button>
 
       {open && (
         <div className="absolute top-full left-0 mt-1 w-44 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 py-1">
-          {OPCIONES.map(p => {
-            const active = pathname === p.href || pathname.startsWith(p.href + "/")
+          {pages.map(p => {
+            const isActive = pathname === p.href || pathname.startsWith(p.href + "/")
             return (
               <Link
                 key={p.href}
                 href={p.href}
                 onClick={() => setOpen(false)}
                 className={`block px-4 py-2 text-sm font-medium transition-colors ${
-                  active
-                    ? "bg-emerald-800/60 text-emerald-200"
-                    : "text-emerald-600 hover:text-emerald-400 hover:bg-gray-800/60"
+                  isActive ? accentActive : `text-gray-400 hover:text-gray-100 hover:bg-gray-800/60`
                 }`}
               >
                 {p.label}
@@ -107,25 +109,53 @@ function OpcionesDropdown({ inOpciones, pathname }: { inOpciones: boolean; pathn
   )
 }
 
+function NavLink({ href, label, active }: { href: string; label: string; active: boolean }) {
+  return (
+    <Link href={href} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+      active ? "bg-gray-700 text-white" : "text-gray-400 hover:text-gray-200 hover:bg-gray-800/60"
+    }`}>
+      {label}
+    </Link>
+  )
+}
+
 export function Nav() {
   const path = usePathname()
   const { theme, toggle } = useTheme()
-  const inOpciones = isOpcionesPath(path)
+
+  const inAcciones     = isInSection(path, ACCIONES_PREFIXES)
+  const inInstitucional = isInSection(path, INSTITUCIONAL_PREFIXES)
+  const inPortafolio   = path === "/portafolio" || path.startsWith("/portafolio/") || path === "/gex/portafolio"
+  const inMacroFX      = path === "/macro-fx" || path.startsWith("/macro-fx/")
 
   return (
     <nav className="bg-gray-900 border-b border-gray-800 px-6 py-2.5">
       <div className="flex gap-1 flex-wrap items-center">
 
-        {/* Sección Acciones */}
-        {ACCIONES.map(p => {
-          const active = p.exact ? path === p.href : path === p.href || path.startsWith(p.href + "/")
-          return <NavItem key={p.href} href={p.href} label={p.label} active={active} />
-        })}
+        <Link href="/" className="px-3 py-1.5 rounded-lg text-sm font-black text-white mr-2 hover:bg-gray-800/60 transition-colors">
+          WALL
+        </Link>
 
-        <span className="text-gray-700 text-xs mx-1">|</span>
+        <NavDropdown
+          label="Acciones"
+          pages={ACCIONES}
+          active={inAcciones}
+          pathname={path}
+          accentActive="bg-blue-900/60 text-blue-200"
+          accentHover=""
+        />
 
-        {/* Sección Opciones */}
-        <OpcionesDropdown inOpciones={inOpciones} pathname={path} />
+        <NavDropdown
+          label="Institucional"
+          pages={INSTITUCIONAL}
+          active={inInstitucional}
+          pathname={path}
+          accentActive="bg-emerald-900/60 text-emerald-200"
+          accentHover=""
+        />
+
+        <NavLink href="/portafolio" label="Portafolio" active={inPortafolio} />
+        <NavLink href="/macro-fx"   label="Macro FX"   active={inMacroFX} />
 
         <button
           onClick={toggle}
