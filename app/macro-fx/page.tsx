@@ -10,6 +10,7 @@ import { TopPairs } from '@/components/MacroFX/TopPairs'
 import { HighConvictionSignals } from '@/components/MacroFX/HighConvictionSignals'
 import { MacroInputGrid } from '@/components/MacroFX/MacroInputGrid'
 import { COTPanel } from '@/components/MacroFX/COTPanel'
+import { TechnicalLevels } from '@/components/MacroFX/TechnicalLevels'
 
 const STORAGE_KEY = 'macro-fx-state'
 
@@ -170,6 +171,7 @@ export default function MacroFXPage() {
               </button>
             </div>
           )}
+          <TechnicalLevels />
         </div>
       )}
 
