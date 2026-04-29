@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from "react"
 
-type CFDConversion = { symbol: string; price: number; ratio: number }
-
 type SRData = {
   symbol: string
   price: number
@@ -16,7 +14,11 @@ type SRData = {
   openingRange: { high: number; low: number } | null
   emas: { ema20: number; ema50: number; ema200: number }
   marketState: string
-  cfd: CFDConversion | null
+}
+
+const CFD_LABEL: Record<string, string> = {
+  GLD: "GLD / XAU·USD",
+  QQQ: "QQQ / NQ100",
 }
 
 type Level = { label: string; value: number; kind: "vwap" | "pivot" | "ema" | "pd" | "or" }
@@ -36,11 +38,11 @@ function buildLevels(d: SRData): Level[] {
   ]
 
   if (d.vwap && d.vwapBands) {
-    all.push({ label: "VWAP",    value: d.vwap,              kind: "vwap" })
-    all.push({ label: "VWAP+1σ", value: d.vwapBands.s1up,   kind: "vwap" })
-    all.push({ label: "VWAP+2σ", value: d.vwapBands.s2up,   kind: "vwap" })
-    all.push({ label: "VWAP-1σ", value: d.vwapBands.s1dn,   kind: "vwap" })
-    all.push({ label: "VWAP-2σ", value: d.vwapBands.s2dn,   kind: "vwap" })
+    all.push({ label: "VWAP",    value: d.vwap,             kind: "vwap" })
+    all.push({ label: "VWAP+1σ", value: d.vwapBands.s1up,  kind: "vwap" })
+    all.push({ label: "VWAP+2σ", value: d.vwapBands.s2up,  kind: "vwap" })
+    all.push({ label: "VWAP-1σ", value: d.vwapBands.s1dn,  kind: "vwap" })
+    all.push({ label: "VWAP-2σ", value: d.vwapBands.s2dn,  kind: "vwap" })
   }
 
   if (d.openingRange) {
@@ -56,29 +58,18 @@ function distPct(level: number, price: number) {
   return `${d >= 0 ? "+" : ""}${d.toFixed(1)}%`
 }
 
-function fmtCfd(cfdVal: number, symbol: string) {
-  return symbol === "XAU/USD"
-    ? `$${cfdVal.toLocaleString("en", { maximumFractionDigits: 0 })}`
-    : cfdVal.toLocaleString("en", { maximumFractionDigits: 0 })
-}
-
-function LevelRow({ label, value, price, kind, cfd }: Level & { price: number; cfd: CFDConversion | null }) {
-  const above   = value > price
-  const isVwap  = kind === "vwap"
-  const isPP    = kind === "pivot" && label === "PP"
+function LevelRow({ label, value, price, kind }: Level & { price: number }) {
+  const above  = value > price
+  const isVwap = kind === "vwap"
+  const isPP   = kind === "pivot" && label === "PP"
 
   const labelColor = isVwap ? "text-amber-400" : isPP ? "text-gray-400" : above ? "text-red-400" : "text-emerald-400"
   const distColor  = above ? "text-red-600" : "text-emerald-700"
-  const cfdVal     = cfd ? Math.round(value * cfd.ratio) : null
 
   return (
     <div className={`flex items-center justify-between py-0.5 text-xs ${labelColor}`}>
       <span className="w-16 font-mono">{label}</span>
       <span className="font-mono font-semibold">${value.toFixed(2)}</span>
-      {cfdVal != null && cfd
-        ? <span className="font-mono text-[10px] text-gray-600">{fmtCfd(cfdVal, cfd.symbol)}</span>
-        : <span className="w-14" />
-      }
       <span className={`font-mono text-right w-12 ${distColor}`}>{distPct(value, price)}</span>
     </div>
   )
@@ -89,30 +80,19 @@ function AssetCard({ data }: { data: SRData }) {
   const resistances = levels.filter(l => l.value > data.price)
   const supports    = levels.filter(l => l.value <= data.price)
   const inSession   = data.marketState === "REGULAR"
+  const headerLabel = CFD_LABEL[data.symbol] ?? data.symbol
 
   return (
     <div>
-      {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-black text-white text-sm">{data.symbol}</span>
-            <span className="text-gray-200 font-mono text-sm">${data.price.toFixed(2)}</span>
+            <span className="font-black text-white text-sm">{headerLabel}</span>
             {inSession && (
               <span className="text-[9px] font-bold text-emerald-500 bg-emerald-900/40 px-1.5 py-0.5 rounded">LIVE</span>
             )}
           </div>
-          {data.cfd && (
-            <div className="text-[10px] text-gray-500 mt-0.5">
-              → {data.cfd.symbol}{" "}
-              <span className="font-mono text-gray-300">
-                {data.cfd.symbol === "XAU/USD"
-                  ? `$${data.cfd.price.toLocaleString("en", { maximumFractionDigits: 2 })}`
-                  : data.cfd.price.toLocaleString("en")}
-              </span>
-              <span className="text-gray-600 ml-1">(×{data.cfd.ratio})</span>
-            </div>
-          )}
+          <span className="text-gray-300 font-mono text-sm">${data.price.toFixed(2)}</span>
         </div>
         <div className="text-right">
           <div className="text-[9px] text-gray-600 tracking-wide">ATR-14</div>
@@ -120,32 +100,28 @@ function AssetCard({ data }: { data: SRData }) {
         </div>
       </div>
 
-      {/* Resistencias */}
       <div className="text-[9px] text-red-800 tracking-widest font-bold mb-0.5">RESISTENCIAS</div>
       <div className="mb-1">
         {resistances.length > 0
-          ? resistances.map(l => <LevelRow key={`${l.label}-${l.value}`} {...l} price={data.price} cfd={data.cfd} />)
+          ? resistances.map(l => <LevelRow key={`${l.label}-${l.value}`} {...l} price={data.price} />)
           : <div className="text-[10px] text-gray-700 py-1">— precio en máximos del rango —</div>
         }
       </div>
 
-      {/* Precio actual */}
       <div className="flex items-center gap-2 my-2">
         <div className="flex-1 h-px bg-gray-700" />
         <span className="text-xs font-mono font-bold text-white whitespace-nowrap">${data.price.toFixed(2)}</span>
         <div className="flex-1 h-px bg-gray-700" />
       </div>
 
-      {/* Soportes */}
       <div className="text-[9px] text-emerald-900 tracking-widest font-bold mb-0.5">SOPORTES</div>
       <div className="mb-3">
         {supports.length > 0
-          ? supports.map(l => <LevelRow key={`${l.label}-${l.value}`} {...l} price={data.price} cfd={data.cfd} />)
+          ? supports.map(l => <LevelRow key={`${l.label}-${l.value}`} {...l} price={data.price} />)
           : <div className="text-[10px] text-gray-700 py-1">— precio en mínimos del rango —</div>
         }
       </div>
 
-      {/* Stops */}
       <div className="border-t border-gray-800 pt-2.5">
         <div className="text-[9px] text-gray-600 tracking-widest font-bold mb-1.5">STOPS SUGERIDOS (LONG)</div>
         <div className="grid grid-cols-3 gap-1">
@@ -162,10 +138,10 @@ function AssetCard({ data }: { data: SRData }) {
 }
 
 export function TechnicalLevels() {
-  const [data, setData]         = useState<{ GLD: SRData; QQQ: SRData } | null>(null)
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState<string | null>(null)
-  const [updated, setUpdated]   = useState<Date | null>(null)
+  const [data, setData]       = useState<{ GLD: SRData; QQQ: SRData } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState<string | null>(null)
+  const [updated, setUpdated] = useState<Date | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -202,13 +178,8 @@ export function TechnicalLevels() {
         )}
       </div>
 
-      {loading && (
-        <div className="py-10 text-center text-gray-600 text-sm">Cargando niveles...</div>
-      )}
-
-      {error && (
-        <div className="py-4 text-center text-red-500 text-xs">{error}</div>
-      )}
+      {loading && <div className="py-10 text-center text-gray-600 text-sm">Cargando niveles...</div>}
+      {error   && <div className="py-4 text-center text-red-500 text-xs">{error}</div>}
 
       {data && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
