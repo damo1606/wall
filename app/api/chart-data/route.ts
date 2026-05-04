@@ -59,14 +59,15 @@ export async function GET(req: Request) {
       }
       candles = Array.from(buckets.entries())
         .sort(([a], [b]) => a - b)
-        .map(([bucket, bars]) => ({
-          time:   bucket,
-          open:   bars[0].open,
-          high:   Math.max(...bars.map(b => b.high)),
-          low:    Math.min(...bars.map(b => b.low)),
-          close:  bars[bars.length - 1].close,
-          volume: bars.reduce((s, b) => s + b.volume, 0),
-        }))
+        .map(([bucket, bars]) => {
+          let high = bars[0].high, low = bars[0].low, vol = 0
+          for (const b of bars) {
+            if (b.high > high) high = b.high
+            if (b.low  < low)  low  = b.low
+            vol += b.volume
+          }
+          return { time: bucket, open: bars[0].open, high, low, close: bars[bars.length - 1].close, volume: vol }
+        })
     }
 
     return NextResponse.json({ candles })

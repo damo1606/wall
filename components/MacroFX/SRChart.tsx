@@ -164,13 +164,20 @@ function ChartPanel({ symbol, tf, levels }: { symbol: "GLD" | "QQQ"; tf: Tf; lev
 
     chart.timeScale().fitContent()
 
+    let roTimer: ReturnType<typeof setTimeout> | null = null
     const ro = new ResizeObserver(() => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth })
+      if (roTimer) clearTimeout(roTimer)
+      roTimer = setTimeout(() => {
+        if (containerRef.current) {
+          const w = containerRef.current.clientWidth
+          if (w > 0) chart.applyOptions({ width: w })
+        }
+      }, 100)
     })
     ro.observe(containerRef.current)
     setStatus("ok")
 
-    return () => { ro.disconnect(); chart.remove(); chartRef.current = null }
+    return () => { if (roTimer) clearTimeout(roTimer); ro.disconnect(); chart.remove(); chartRef.current = null }
   }, [candles, levels]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
