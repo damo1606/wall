@@ -16,6 +16,16 @@ async function fetchChart(symbol: string, interval: string, range: string, crumb
 }
 
 
+async function fetchSpotPrice(symbol: string, crumb: string, cookie: string): Promise<number | null> {
+  const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d&crumb=${encodeURIComponent(crumb)}`
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": UA, Cookie: cookie }, cache: "no-store" })
+    if (!res.ok) return null
+    const data = await res.json()
+    return (data?.chart?.result?.[0]?.meta?.regularMarketPrice as number) ?? null
+  } catch { return null }
+}
+
 function calcEMA(values: number[], period: number): number {
   if (values.length === 0) return 0
   const p = Math.min(period, values.length)
@@ -142,12 +152,20 @@ export async function GET() {
   const auth = await getCrumb()
   if (!auth) return NextResponse.json({ error: "Yahoo Finance no disponible" }, { status: 503 })
 
-  const [gld, qqq] = await Promise.all([
+  const [gld, qqq, ndx, xauusd] = await Promise.all([
     buildLevels("GLD", auth.crumb, auth.cookie),
     buildLevels("QQQ", auth.crumb, auth.cookie),
+    fetchSpotPrice("^NDX",     auth.crumb, auth.cookie),
+    fetchSpotPrice("XAUUSD=X", auth.crumb, auth.cookie),
   ])
 
   if (!gld || !qqq) return NextResponse.json({ error: "Sin datos" }, { status: 502 })
 
-  return NextResponse.json({ GLD: gld, QQQ: qqq })
+  const gldRatio = xauusd && gld.price > 0 ? xauusd / gld.price : 10.799
+  const qqqRatio = ndx    && qqq.price > 0 ? ndx    / qqq.price : null
+
+  return NextResponse.json({
+    GLD: { ...gld, cfd: { symbol: "XAU/USD", price: round2(gld.price * gldRatio), ratio: round2(gldRatio) } },
+    QQQ: { ...qqq, cfd: qqqRatio ? { symbol: "NQ100", price: Math.round(qqq.price * qqqRatio), ratio: round2(qqqRatio) } : null },
+  })
 }
