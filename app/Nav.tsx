@@ -16,6 +16,7 @@ function NavSearch() {
   const inputRef  = useRef<HTMLInputElement>(null)
   const wrapRef   = useRef<HTMLDivElement>(null)
   const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortRef  = useRef<AbortController | null>(null)
 
   const close = useCallback(() => { setOpen(false); setQuery(""); setResults([]) }, [])
 
@@ -30,18 +31,23 @@ function NavSearch() {
   }, [close])
 
   useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 0)
+    if (open) inputRef.current?.focus()
   }, [open])
 
   function handleChange(v: string) {
     setQuery(v)
     if (timerRef.current) clearTimeout(timerRef.current)
+    abortRef.current?.abort()
     if (!v.trim()) { setResults([]); return }
     timerRef.current = setTimeout(async () => {
+      const controller = new AbortController()
+      abortRef.current = controller
       setLoading(true)
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(v)}`)
+        const res = await fetch(`/api/search?q=${encodeURIComponent(v)}`, { signal: controller.signal })
         if (res.ok) setResults(await res.json())
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") setResults([])
       } finally { setLoading(false) }
     }, 300)
   }
