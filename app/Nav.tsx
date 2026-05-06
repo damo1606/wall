@@ -1,9 +1,106 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "./ThemeProvider"
+
+type SearchResult = { symbol: string; name: string; exchange: string; type: string }
+
+function NavSearch() {
+  const router = useRouter()
+  const [open, setOpen]       = useState(false)
+  const [query, setQuery]     = useState("")
+  const [results, setResults] = useState<SearchResult[]>([])
+  const [loading, setLoading] = useState(false)
+  const inputRef  = useRef<HTMLInputElement>(null)
+  const wrapRef   = useRef<HTMLDivElement>(null)
+  const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const close = useCallback(() => { setOpen(false); setQuery(""); setResults([]) }, [])
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) close()
+    }
+    function handleKey(e: KeyboardEvent) { if (e.key === "Escape") close() }
+    document.addEventListener("mousedown", handle)
+    document.addEventListener("keydown", handleKey)
+    return () => { document.removeEventListener("mousedown", handle); document.removeEventListener("keydown", handleKey) }
+  }, [close])
+
+  useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 0)
+  }, [open])
+
+  function handleChange(v: string) {
+    setQuery(v)
+    if (timerRef.current) clearTimeout(timerRef.current)
+    if (!v.trim()) { setResults([]); return }
+    timerRef.current = setTimeout(async () => {
+      setLoading(true)
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(v)}`)
+        if (res.ok) setResults(await res.json())
+      } finally { setLoading(false) }
+    }, 300)
+  }
+
+  function pick(symbol: string) { router.push(`/empresa/${symbol}`); close() }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-gray-800/60 transition-colors"
+        title="Buscar acción"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute top-full right-0 mt-1 w-72 z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-xl overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500 shrink-0">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={e => handleChange(e.target.value)}
+                placeholder="Símbolo o nombre..."
+                className="flex-1 bg-transparent text-sm text-white placeholder-gray-600 outline-none"
+              />
+              {loading && <span className="text-[10px] text-gray-600">...</span>}
+            </div>
+            {results.length > 0 && (
+              <ul className="py-1 max-h-64 overflow-y-auto">
+                {results.map(r => (
+                  <li key={r.symbol}>
+                    <button
+                      onClick={() => pick(r.symbol)}
+                      className="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-800/60 transition-colors text-left"
+                    >
+                      <span className="text-sm font-bold text-white w-16 shrink-0">{r.symbol}</span>
+                      <span className="text-xs text-gray-400 truncate flex-1">{r.name}</span>
+                      <span className="text-[10px] text-gray-600 shrink-0">{r.exchange}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {query.trim() && !loading && results.length === 0 && (
+              <div className="px-3 py-3 text-xs text-gray-600">Sin resultados</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 type NavPage = { href: string; label: string }
 
@@ -156,6 +253,8 @@ export function Nav() {
 
         <NavLink href="/portafolio" label="Portafolio" active={inPortafolio} />
         <NavLink href="/macro-fx"   label="Macro FX"   active={inMacroFX} />
+
+        <NavSearch />
 
         <button
           onClick={toggle}
