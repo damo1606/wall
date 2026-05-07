@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { CURRENCIES } from '@/lib/forex'
 import type { Currency, COTData } from '@/types/forex'
 
@@ -13,20 +13,23 @@ export function COTPanel({ cotData, onUpdate }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchFromCFTC = useCallback(async function fetchFromCFTC() {
+  const onUpdateRef = useRef(onUpdate)
+  useEffect(() => { onUpdateRef.current = onUpdate }, [onUpdate])
+
+  const fetchFromCFTC = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const res = await fetch('/api/cot')
       if (!res.ok) throw new Error(`Error ${res.status}`)
       const data = await res.json() as COTData
-      onUpdate(data)
+      onUpdateRef.current(data)
     } catch (err) {
       setError((err as Error).message)
     } finally {
       setLoading(false)
     }
-  }, [onUpdate])
+  }, [])
 
   useEffect(() => { fetchFromCFTC() }, [fetchFromCFTC])
 
