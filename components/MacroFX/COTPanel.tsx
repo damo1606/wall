@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { CURRENCIES } from '@/lib/forex'
 import type { Currency, COTData } from '@/types/forex'
 
@@ -13,9 +13,7 @@ export function COTPanel({ cotData, onUpdate }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => { fetchFromCFTC() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function fetchFromCFTC() {
+  const fetchFromCFTC = useCallback(async function fetchFromCFTC() {
     setLoading(true)
     setError(null)
     try {
@@ -28,7 +26,9 @@ export function COTPanel({ cotData, onUpdate }: Props) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [onUpdate])
+
+  useEffect(() => { fetchFromCFTC() }, [fetchFromCFTC])
 
   function scoreLabel(v: number | undefined): string {
     if (v === undefined) return '—'
