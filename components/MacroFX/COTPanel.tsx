@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { CURRENCIES } from '@/lib/forex'
 import type { Currency, COTData } from '@/types/forex'
 
@@ -12,6 +12,8 @@ interface Props {
 export function COTPanel({ cotData, onUpdate }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => { fetchFromCFTC() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function fetchFromCFTC() {
     setLoading(true)
