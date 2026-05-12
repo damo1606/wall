@@ -1,4 +1,5 @@
 import { unstable_cache } from 'next/cache'
+import { NextRequest, NextResponse } from 'next/server'
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,9 @@ async function callGemini(prompt: string): Promise<string> {
   )
   if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`)
   const json = await res.json()
-  return json.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error('Gemini returned no text content')
+  return text
 }
 
 async function callGroq(prompt: string): Promise<string> {
@@ -94,12 +97,18 @@ async function callGroq(prompt: string): Promise<string> {
   })
   if (!res.ok) throw new Error(`Groq HTTP ${res.status}`)
   const json = await res.json()
-  return json.choices?.[0]?.message?.content ?? ''
+  const text = json.choices?.[0]?.message?.content
+  if (!text) throw new Error('Groq returned no message content')
+  return text
 }
 
 async function callLLM(prompt: string): Promise<{ text: string; proveedor: string }> {
   if (process.env.GEMINI_API_KEY) {
-    try { return { text: await callGemini(prompt), proveedor: 'gemini' } } catch {}
+    try {
+      return { text: await callGemini(prompt), proveedor: 'gemini' }
+    } catch (e) {
+      console.error('Gemini failed, falling back to Groq:', e instanceof Error ? e.message : String(e))
+    }
   }
   if (process.env.GROQ_API_KEY) {
     return { text: await callGroq(prompt), proveedor: 'groq' }
@@ -107,30 +116,52 @@ async function callLLM(prompt: string): Promise<{ text: string; proveedor: strin
   throw new Error('Configura GEMINI_API_KEY o GROQ_API_KEY en las variables de entorno')
 }
 
+// ── Analysis Configuration ────────────────────────────────────────────────────
+
+const ANALYSIS_CONFIG = {
+  supply_chain: {
+    prompt: SUPPLY_CHAIN_PROMPT,
+    required: ['actores_clave', 'flujo_materiales', 'puntos_riesgo'],
+  },
+  value_chain: {
+    prompt: VALUE_CHAIN_PROMPT,
+    required: ['actividades_primarias', 'actividades_soporte', 'ventajas_competitivas'],
+  },
+  foda: {
+    prompt: FODA_PROMPT,
+    required: ['fortalezas', 'oportunidades', 'debilidades', 'amenazas'],
+  },
+} as const
+
+export type AnalysisType = keyof typeof ANALYSIS_CONFIG
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
-const REQUIRED: Record<string, string[]> = {
-  supply_chain: ['actores_clave', 'flujo_materiales', 'puntos_riesgo'],
-  value_chain:  ['actividades_primarias', 'actividades_soporte', 'ventajas_competitivas'],
-  foda:         ['fortalezas', 'oportunidades', 'debilidades', 'amenazas'],
+function scoreValidation(data: Record<string, unknown>, type: string): number {
+  const keys = ANALYSIS_CONFIG[type as AnalysisType]?.required ?? []
+  const found = keys.filter(k => Array.isArray(data[k]) ? data[k].length > 0 : k in data)
+  return found.length / Math.max(keys.length, 1)
 }
 
 function validate(text: string, type: string): { data: Record<string, unknown>; score: number } {
-  const match = text.match(/\{[\s\S]*\}/)
-  if (!match) return { data: {}, score: 0 }
+  // Try direct JSON parse first
   try {
-    const data = JSON.parse(match[0])
-    const keys = REQUIRED[type] ?? []
-    const found = keys.filter(k => Array.isArray(data[k]) ? data[k].length > 0 : k in data)
-    return { data, score: found.length / Math.max(keys.length, 1) }
+    const data = JSON.parse(text)
+    return { data, score: scoreValidation(data, type) }
   } catch {
-    return { data: {}, score: 0 }
+    // Fallback to regex with non-greedy matching
+    const match = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/)
+    if (!match) return { data: {}, score: 0 }
+    try {
+      const data = JSON.parse(match[0])
+      return { data, score: scoreValidation(data, type) }
+    } catch {
+      return { data: {}, score: 0 }
+    }
   }
 }
 
 // ── Core analyze ──────────────────────────────────────────────────────────────
-
-export type AnalysisType = 'supply_chain' | 'value_chain' | 'foda'
 
 export type AnalysisResult = {
   data: Record<string, unknown>
@@ -139,15 +170,41 @@ export type AnalysisResult = {
 }
 
 async function _analyze(type: AnalysisType, sector: string, subsector: string): Promise<AnalysisResult> {
-  const prompts: Record<AnalysisType, string> = {
-    supply_chain: SUPPLY_CHAIN_PROMPT(sector, subsector),
-    value_chain:  VALUE_CHAIN_PROMPT(sector, subsector),
-    foda:         FODA_PROMPT(sector, subsector),
-  }
-  const { text, proveedor } = await callLLM(prompts[type])
+  const config = ANALYSIS_CONFIG[type]
+  const prompt = config.prompt(sector, subsector)
+  const { text, proveedor } = await callLLM(prompt)
   const { data, score } = validate(text, type)
   if (score < 0.5) throw new Error('Respuesta incompleta del LLM. Intenta de nuevo.')
   return { data, proveedor, confidence: score }
+}
+
+// ── Validation for API routes ────────────────────────────────────────────────
+
+function validateInput(sector: string, subsector: string): string | null {
+  if (!sector?.length || sector.length > 200) return 'Sector inválido'
+  if (!subsector?.length || subsector.length > 200) return 'Subsector inválido'
+  return null
+}
+
+// ── Request handler factory ───────────────────────────────────────────────────
+
+export function createCadenasHandler(
+  analyzer: (sector: string, subsector: string) => Promise<AnalysisResult>
+) {
+  return async (req: NextRequest) => {
+    try {
+      const { sector, subsector } = await req.json()
+      const error = validateInput(sector, subsector)
+      if (error) {
+        return NextResponse.json({ error }, { status: 400 })
+      }
+      const result = await analyzer(sector.trim(), subsector.trim())
+      return NextResponse.json(result)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Error desconocido'
+      return NextResponse.json({ error: msg }, { status: 422 })
+    }
+  }
 }
 
 // ── Cached exports (24h TTL) ──────────────────────────────────────────────────
@@ -155,17 +212,17 @@ async function _analyze(type: AnalysisType, sector: string, subsector: string): 
 export const analyzeSupplyChain = unstable_cache(
   (sector: string, subsector: string) => _analyze('supply_chain', sector, subsector),
   ['cadenas-supply'],
-  { revalidate: 86400 }
+  { revalidate: 86400, tags: ['cadenas'] }
 )
 
 export const analyzeValueChain = unstable_cache(
   (sector: string, subsector: string) => _analyze('value_chain', sector, subsector),
   ['cadenas-value'],
-  { revalidate: 86400 }
+  { revalidate: 86400, tags: ['cadenas'] }
 )
 
 export const analyzeFoda = unstable_cache(
   (sector: string, subsector: string) => _analyze('foda', sector, subsector),
   ['cadenas-foda'],
-  { revalidate: 86400 }
+  { revalidate: 86400, tags: ['cadenas'] }
 )
