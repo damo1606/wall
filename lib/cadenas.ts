@@ -1,6 +1,18 @@
 import { unstable_cache } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 
+// ── Environment Configuration ─────────────────────────────────────────────────
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+const GROQ_API_KEY = process.env.GROQ_API_KEY
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const HTTP_STATUS = {
+  BAD_REQUEST: 400,
+  UNPROCESSABLE_ENTITY: 422,
+} as const
+
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
 const SUPPLY_CHAIN_PROMPT = (sector: string, subsector: string) => `
@@ -61,10 +73,9 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional:
 // ── LLM Providers ─────────────────────────────────────────────────────────────
 
 async function callGemini(prompt: string): Promise<string> {
-  const key = process.env.GEMINI_API_KEY
-  if (!key) throw new Error('GEMINI_API_KEY no configurada')
+  if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY no configurada')
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -83,11 +94,10 @@ async function callGemini(prompt: string): Promise<string> {
 }
 
 async function callGroq(prompt: string): Promise<string> {
-  const key = process.env.GROQ_API_KEY
-  if (!key) throw new Error('GROQ_API_KEY no configurada')
+  if (!GROQ_API_KEY) throw new Error('GROQ_API_KEY no configurada')
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_API_KEY}` },
     body: JSON.stringify({
       model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
@@ -103,14 +113,15 @@ async function callGroq(prompt: string): Promise<string> {
 }
 
 async function callLLM(prompt: string): Promise<{ text: string; proveedor: string }> {
-  if (process.env.GEMINI_API_KEY) {
+  if (GEMINI_API_KEY) {
     try {
       return { text: await callGemini(prompt), proveedor: 'gemini' }
     } catch (e) {
-      console.error('Gemini failed, falling back to Groq:', e instanceof Error ? e.message : String(e))
+      console.error('Gemini falló, usando Groq como fallback:', e instanceof Error ? e.message : String(e))
+      // Continue to Groq fallback
     }
   }
-  if (process.env.GROQ_API_KEY) {
+  if (GROQ_API_KEY) {
     return { text: await callGroq(prompt), proveedor: 'groq' }
   }
   throw new Error('Configura GEMINI_API_KEY o GROQ_API_KEY en las variables de entorno')
@@ -137,28 +148,37 @@ export type AnalysisType = keyof typeof ANALYSIS_CONFIG
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
-function scoreValidation(data: Record<string, unknown>, type: string): number {
-  const keys = ANALYSIS_CONFIG[type as AnalysisType]?.required ?? []
+function scoreValidation(data: Record<string, unknown>, type: AnalysisType): number {
+  const keys = ANALYSIS_CONFIG[type].required
   const found = keys.filter(k => Array.isArray(data[k]) ? data[k].length > 0 : k in data)
   return found.length / Math.max(keys.length, 1)
 }
 
-function validate(text: string, type: string): { data: Record<string, unknown>; score: number } {
-  // Try direct JSON parse first
+function tryParseJSON(text: string): Record<string, unknown> | null {
   try {
-    const data = JSON.parse(text)
-    return { data, score: scoreValidation(data, type) }
+    return JSON.parse(text)
   } catch {
-    // Fallback to regex with non-greedy matching
-    const match = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/)
-    if (!match) return { data: {}, score: 0 }
-    try {
-      const data = JSON.parse(match[0])
-      return { data, score: scoreValidation(data, type) }
-    } catch {
-      return { data: {}, score: 0 }
-    }
+    return null
   }
+}
+
+function extractJSONFromText(text: string): string | null {
+  // Extract JSON object from text using regex (handles LLM responses with extra text)
+  const match = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/)
+  return match?.[0] ?? null
+}
+
+function validate(text: string, type: AnalysisType): { data: Record<string, unknown>; score: number } {
+  // Try direct JSON parse first (fast path for valid JSON responses)
+  let data = tryParseJSON(text)
+  if (data) return { data, score: scoreValidation(data, type) }
+
+  // Fallback: extract JSON from text using regex
+  const jsonText = extractJSONFromText(text)
+  if (!jsonText) return { data: {}, score: 0 }
+
+  data = tryParseJSON(jsonText)
+  return { data: data ?? {}, score: data ? scoreValidation(data, type) : 0 }
 }
 
 // ── Core analyze ──────────────────────────────────────────────────────────────
@@ -181,8 +201,11 @@ async function _analyze(type: AnalysisType, sector: string, subsector: string): 
 // ── Validation for API routes ────────────────────────────────────────────────
 
 function validateInput(sector: string, subsector: string): string | null {
-  if (!sector?.length || sector.length > 200) return 'Sector inválido'
-  if (!subsector?.length || subsector.length > 200) return 'Subsector inválido'
+  const trimmedSector = sector?.trim()
+  const trimmedSubsector = subsector?.trim()
+
+  if (!trimmedSector || trimmedSector.length > 200) return 'Sector inválido'
+  if (!trimmedSubsector || trimmedSubsector.length > 200) return 'Subsector inválido'
   return null
 }
 
@@ -196,19 +219,20 @@ export function createCadenasHandler(
       const { sector, subsector } = await req.json()
       const error = validateInput(sector, subsector)
       if (error) {
-        return NextResponse.json({ error }, { status: 400 })
+        return NextResponse.json({ error }, { status: HTTP_STATUS.BAD_REQUEST })
       }
       const result = await analyzer(sector.trim(), subsector.trim())
       return NextResponse.json(result)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error desconocido'
-      return NextResponse.json({ error: msg }, { status: 422 })
+      return NextResponse.json({ error: msg }, { status: HTTP_STATUS.UNPROCESSABLE_ENTITY })
     }
   }
 }
 
 // ── Cached exports (24h TTL) ──────────────────────────────────────────────────
 
+// Generate cached analyzers from config to reduce copy-paste and maintain DRY principle
 export const analyzeSupplyChain = unstable_cache(
   (sector: string, subsector: string) => _analyze('supply_chain', sector, subsector),
   ['cadenas-supply'],

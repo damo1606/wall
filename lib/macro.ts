@@ -126,7 +126,9 @@ async function fetchFred(cfg: SeriesCfg): Promise<Array<{ date: string; value: n
 
     let url: string
     if (apiKey) {
-      url = `https://api.stlouisfed.org/fred/series/observations?series_id=${cfg.id}&api_key=${apiKey}&file_type=json&units=${cfg.units}&observation_start=${start}&sort_order=asc&limit=${cfg.limit}`
+      // sort_order=desc + limit=N → últimas N observaciones (las más recientes)
+      // luego se revierten para que toIndicator() reciba ASC (oldest first, newest last)
+      url = `https://api.stlouisfed.org/fred/series/observations?series_id=${cfg.id}&api_key=${apiKey}&file_type=json&units=${cfg.units}&observation_start=${start}&sort_order=desc&limit=${cfg.limit}`
     } else {
       // Fallback al CSV público si no hay API key (sin transformaciones)
       url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${cfg.id}&observation_start=${start}`
@@ -142,7 +144,8 @@ async function fetchFred(cfg: SeriesCfg): Promise<Array<{ date: string; value: n
           const v = parseFloat(o.value)
           return isNaN(v) ? null : { date: o.date, value: v }
         })
-        .filter(Boolean) as Array<{ date: string; value: number }>
+        .filter(Boolean)
+        .reverse() as Array<{ date: string; value: number }>
     } else {
       // Parsear CSV
       const text = await res.text()
