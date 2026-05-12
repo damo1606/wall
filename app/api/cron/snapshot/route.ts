@@ -88,6 +88,32 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: error.message, errors }, { status: 500 })
   }
 
+  // 6) Discord webhook: notifica si hay GO signals o régimen extremo
+  const webhook = process.env.DISCORD_WEBHOOK_URL
+  if (webhook) {
+    type SoreRow = { symbol: string; soreGate?: string; soreCSS?: number; soreStrategy?: string }
+    const rows = (scannerPro?.rows ?? []) as SoreRow[]
+    const goSignals = rows
+      .filter(r => r.soreGate === "GO")
+      .sort((a, b) => (b.soreCSS ?? 0) - (a.soreCSS ?? 0))
+      .slice(0, 10)
+    const extremeRegime = regime === "PÁNICO AGUDO" || regime === "CRISIS SISTÉMICA"
+
+    if (goSignals.length > 0 || extremeRegime) {
+      const goList = goSignals.length > 0
+        ? goSignals.map(r => `• **${r.symbol}** CSS=${r.soreCSS} → ${r.soreStrategy}`).join("\n")
+        : "_Sin GO signals_"
+      const regimeAlert = extremeRegime ? `\n\n🚨 **RÉGIMEN ${regime}** — gatillo suspendido` : ""
+      const content = `**SORE Snapshot ${today}** · Régimen: ${regime} · VIX ${m6Vix?.toFixed(2)} · Fear ${fearScore}\n\n${goList}${regimeAlert}`
+
+      fetch(webhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      }).catch(e => errors.push(`webhook: ${(e as Error).message}`))
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     date: today,
