@@ -178,7 +178,13 @@ export interface ConvictionRow {
   // Combined
   convictionScore: number;
   verdict: "STRONG BUY" | "BUY" | "WATCH" | "NEUTRAL";
-  soreBias: "BULLISH" | "BEARISH" | "NEUTRAL";
+  // SORE — Systematic Options Revenue Engine (volatility harvesting, NOT directional)
+  soreCSS: number;          // 0–100 Composite Suppression Signal
+  soreDSS: number;          // 0–100 Dealer Stabilization Score
+  soreVSS: number;          // 0–100 Volatility Suppression Score
+  soreVRP: number;          // Vol Risk Premium proxy (0–100)
+  soreStrategy: string;     // SHORT STRANGLE | IRON CONDOR | BWB | CREDIT SPREAD | CALENDAR | AVOID
+  soreGate: "GO" | "WAIT" | "AVOID";
   noOptions?: boolean;
 }
 
@@ -198,11 +204,78 @@ function toVerdict(score: number): ConvictionRow["verdict"] {
   return "NEUTRAL";
 }
 
-function toSoreBias(m7Score: number, m7Verdict: string, suspended: boolean): ConvictionRow["soreBias"] {
-  if (suspended) return "NEUTRAL";
-  if (m7Verdict === "ALCISTA" || m7Score > 20) return "BULLISH";
-  if (m7Verdict === "BAJISTA" || m7Score < -20) return "BEARISH";
-  return "NEUTRAL";
+function computeSORE(
+  m1NetGex: number,
+  m1Pressure: number,
+  m1Pcr: number,
+  m6Vix: number,
+  m6FearScore: number,
+  m6Regime: string,
+  m6Suspended: boolean,
+  m5Score: number,
+): { css: number; dss: number; vss: number; vrp: number; strategy: string; gate: "GO" | "WAIT" | "AVOID" } {
+  // DSS: Dealer Stabilization Score
+  // GEX > 0 = dealers long gamma = buy dips / sell rips = stabilizing
+  const gexScore = m1NetGex > 0
+    ? Math.min(100, 50 + (m1NetGex / 1e9) * 25)
+    : Math.max(0, 50 + (m1NetGex / 1e9) * 15)
+  const pressScore = Math.min(100, Math.max(0, (m1Pressure + 100) / 2))
+  // PCR > 0.8: dealers sold puts = long delta = support bids under market
+  const pcrScore = m1Pcr > 1.2 ? 70 : m1Pcr > 0.8 ? 55 : m1Pcr > 0.5 ? 40 : 25
+  const dss = Math.round(0.40 * gexScore + 0.35 * pressScore + 0.25 * pcrScore)
+
+  // VSS: Volatility Suppression Score
+  // fearScore 30–55 = elevated IV without panic = ideal premium selling window
+  const ivScore =
+    m6FearScore < 20 ? 15
+    : m6FearScore < 35 ? 78
+    : m6FearScore < 55 ? 65
+    : m6FearScore < 70 ? 45
+    : 25
+  const regimeScore =
+    m6Regime === "COMPRESIÓN" ? 90
+    : m6Regime === "TRANSICIÓN" ? 65
+    : m6Regime === "EXPANSIÓN" ? 35
+    : m6Regime === "PÁNICO AGUDO" ? 10
+    : m6Regime === "CRISIS SISTÉMICA" ? 5
+    : 50
+  // M5 near-neutral = range-bound = theta decay accelerates
+  const m5ConfScore = Math.abs(m5Score) < 30 ? 70 : Math.abs(m5Score) < 60 ? 50 : 28
+  const vss = Math.round(0.40 * ivScore + 0.40 * regimeScore + 0.20 * m5ConfScore)
+
+  // VRP: Vol Risk Premium proxy — VIX historically trades ~3-5pts above 20d RV
+  // VIX 12 = floor (VRP ≈ 0), VIX 37 = 100
+  const vrp = Math.round(Math.min(100, Math.max(0, (m6Vix - 12) * 4)))
+
+  // CSS: Composite Suppression Signal
+  const css = Math.round(0.35 * dss + 0.35 * vss + 0.30 * vrp)
+
+  // Hard blocks
+  if (m6Suspended || m6Regime === "PÁNICO AGUDO" || m6Regime === "CRISIS SISTÉMICA" || css < 45) {
+    return { css, dss, vss, vrp, strategy: "AVOID", gate: "AVOID" }
+  }
+
+  let strategy: string
+  let gate: "GO" | "WAIT" | "AVOID"
+
+  if (css >= 75 && dss >= 65) {
+    gate = "GO"
+    if (m6Regime === "COMPRESIÓN" && m6FearScore < 60) {
+      strategy = m1Pcr > 0.9 ? "SHORT STRANGLE" : "IRON CONDOR"
+    } else if (m6FearScore < 40) {
+      strategy = "CALENDAR"
+    } else {
+      strategy = "IRON CONDOR"
+    }
+  } else if (css >= 55) {
+    gate = "WAIT"
+    strategy = m6Regime === "COMPRESIÓN" ? "CREDIT SPREAD" : "BWB"
+  } else {
+    gate = "WAIT"
+    strategy = "CREDIT SPREAD"
+  }
+
+  return { css, dss, vss, vrp, strategy, gate }
 }
 
 // ── Per-ticker analysis ───────────────────────────────────────────────────────
@@ -342,6 +415,10 @@ export async function GET(request: NextRequest) {
             : 0;
 
           const conviction = calcConviction(score.buyScore, m7.finalScore, true);
+          const sore = computeSORE(
+            m1.netGex, m1.institutionalPressure, m1.putCallRatio,
+            m6.vix, m6.fearScore, m6.regime, m6.signalSuspended, m5.score,
+          );
 
           return {
             symbol: stock.symbol,
@@ -392,7 +469,12 @@ export async function GET(request: NextRequest) {
             m7PrimaryShortEntry: m7.primaryShort?.entryPrice ?? 0,
             convictionScore: parseFloat(conviction.toFixed(1)),
             verdict: toVerdict(conviction),
-            soreBias: toSoreBias(m7.finalScore, m7.finalVerdict, m6.signalSuspended),
+            soreCSS: sore.css,
+            soreDSS: sore.dss,
+            soreVSS: sore.vss,
+            soreVRP: sore.vrp,
+            soreStrategy: sore.strategy,
+            soreGate: sore.gate,
           } satisfies ConvictionRow;
         } catch {
           const conviction = calcConviction(score.buyScore, 0, false);
@@ -427,7 +509,8 @@ export async function GET(request: NextRequest) {
             m7PrimaryLongEntry: 0, m7PrimaryShortEntry: 0,
             convictionScore: parseFloat(conviction.toFixed(1)),
             verdict: toVerdict(conviction),
-            soreBias: "NEUTRAL",
+            soreCSS: 0, soreDSS: 0, soreVSS: 0, soreVRP: 0,
+            soreStrategy: "AVOID", soreGate: "AVOID",
             noOptions: true,
           } satisfies ConvictionRow;
         }

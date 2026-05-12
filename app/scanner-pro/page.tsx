@@ -31,13 +31,26 @@ function VerdictBadge({ verdict }: { verdict: ConvictionRow["verdict"] }) {
   return <span className={`text-[10px] font-bold px-2 py-0.5 rounded tracking-widest ${s}`}>{verdict}</span>;
 }
 
-function BiasBadge({ bias, noOptions }: { bias: ConvictionRow["soreBias"]; noOptions?: boolean }) {
-  if (noOptions) return <span className="text-[10px] px-2 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700">SIN OPC.</span>;
-  const s =
-    bias === "BULLISH" ? "bg-emerald-900/60 text-emerald-300 border border-emerald-800" :
-    bias === "BEARISH" ? "bg-red-900/60 text-red-300 border border-red-800" :
-    "bg-gray-800 text-gray-400 border border-gray-700";
-  return <span className={`text-[10px] font-bold px-2 py-0.5 rounded tracking-widest ${s}`}>{bias}</span>;
+function SoreBadge({ row }: { row: ConvictionRow }) {
+  if (row.noOptions) return <span className="text-[10px] px-2 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700">SIN OPC.</span>;
+
+  const gateStyle =
+    row.soreGate === "GO"   ? "bg-emerald-900/60 border-emerald-700 text-emerald-300" :
+    row.soreGate === "WAIT" ? "bg-yellow-900/60 border-yellow-700 text-yellow-300" :
+                              "bg-gray-800 border-gray-700 text-gray-500";
+  const dot = row.soreGate === "GO" ? "●" : row.soreGate === "WAIT" ? "◐" : "○";
+
+  return (
+    <div className="flex flex-col gap-0.5 min-w-[110px]">
+      <div className="flex items-center gap-1.5">
+        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border tracking-widest ${gateStyle}`}>
+          {dot} {row.soreGate}
+        </span>
+        <span className="text-[10px] font-mono font-black text-white">{row.soreCSS}</span>
+      </div>
+      <span className="text-[9px] text-gray-500 tracking-widest truncate">{row.soreStrategy}</span>
+    </div>
+  );
 }
 
 function M7VerdictBadge({ verdict }: { verdict: string }) {
@@ -286,7 +299,7 @@ export default function ScannerProPage() {
                     <Th label="GRADO"       sortKey="grade"            current={sortKey} asc={sortAsc} onSort={handleSort} />
                     <Th label="CONVICCIÓN"  sortKey="convictionScore"  current={sortKey} asc={sortAsc} onSort={handleSort} />
                     <Th label="VEREDICTO"   sortKey="verdict"          current={sortKey} asc={sortAsc} onSort={handleSort} />
-                    <Th label="BIAS M7"     sortKey="soreBias"         current={sortKey} asc={sortAsc} onSort={handleSort} />
+                    <Th label="SORE"        sortKey="soreCSS"          current={sortKey} asc={sortAsc} onSort={handleSort} />
                     <Th label="SCORE DESC." sortKey="buyScore"         current={sortKey} asc={sortAsc} onSort={handleSort} />
                     <Th label="CAÍDA 52W"   sortKey="dropFrom52w"      current={sortKey} asc={sortAsc} onSort={handleSort} />
                     <Th label="VS GRAHAM"   sortKey="discountToGraham" current={sortKey} asc={sortAsc} onSort={handleSort} />
@@ -306,7 +319,7 @@ export default function ScannerProPage() {
                           </span>
                         </td>
                         <td className="px-3 py-2.5"><VerdictBadge verdict={row.verdict} /></td>
-                        <td className="px-3 py-2.5"><BiasBadge bias={row.soreBias} noOptions={row.noOptions} /></td>
+                        <td className="px-3 py-2.5"><SoreBadge row={row} /></td>
                         <td className="px-3 py-2.5 font-mono text-xs">{row.buyScore}</td>
                         <td className="px-3 py-2.5 font-mono text-xs">
                           <span className={row.dropFrom52w <= -20 ? "text-green-400" : "text-gray-400"}>{pct(row.dropFrom52w)}</span>

@@ -120,9 +120,11 @@ const ACCIONES: NavPage[] = [
   { href: "/prospectiva",  label: "Prospectiva" },
   { href: "/diario",       label: "Diario" },
   { href: "/dashboard",    label: "Dashboard" },
+  { href: "/cadenas",     label: "Cadenas" },
 ]
 
 const INSTITUCIONAL: NavPage[] = [
+  { href: "/sore",         label: "SORE" },
   { href: "/gex",          label: "GEX" },
   { href: "/gamma-map",    label: "Gamma Map" },
   { href: "/scanner",      label: "Scanner" },
