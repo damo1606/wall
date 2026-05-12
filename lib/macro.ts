@@ -506,11 +506,13 @@ export function detectPhase(data: MacroData): PhaseDetection {
   if (gdp !== null) {
     if (gdp < 0)         { pts.recession += 3; signals.push(`PIB negativo ${gdp.toFixed(1)}% — contracción real`) }
     else if (gdp < 1.5)  { pts.recovery  += 2; signals.push(`PIB débil ${gdp.toFixed(1)}% — recuperación incipiente`) }
-    else if (gdp < 2.5)  { pts.recovery  += 1 }
+    else if (gdp < 2.5)  { pts.recovery += 1; pts.expansion += 1 }  // 1.5-2.5% es zona saludable, no solo "recovery"
     else if (gdp < 4.0)  { pts.expansion += 2; signals.push(`PIB sólido ${gdp.toFixed(1)}%`) }
     else                 { pts.late += 1; pts.expansion += 1; signals.push(`PIB muy fuerte ${gdp.toFixed(1)}% — posible sobrecalentamiento`) }
-    if (data.gdpGrowth?.trend === "down") { pts.late += 1; signals.push("PIB desacelerando") }
-    if (data.gdpGrowth?.trend === "up")   { pts.recovery += 1 }
+    // Trend "down" solo penaliza si nivel absoluto bajo. PIB 2.0 bajando desde 2.5
+    // es normalización, no señal de late.
+    if (data.gdpGrowth?.trend === "down" && gdp < 2.0) { pts.late += 1; signals.push("PIB desacelerando con nivel bajo") }
+    if (data.gdpGrowth?.trend === "up")                { pts.recovery += 1 }
   }
 
   // ── INFLACIÓN ─────────────────────────────────────────────────────────────
@@ -540,15 +542,29 @@ export function detectPhase(data: MacroData): PhaseDetection {
     if (fed > 4.5)       { pts.late += 2; signals.push(`Tasas restrictivas ${fed.toFixed(2)}%`) }
     else if (fed > 3)    { pts.late += 1; pts.expansion += 1 }
     else if (fed < 1)    { pts.recovery += 2; signals.push(`Tasas en mínimos ${fed.toFixed(2)}% — estímulo monetario`) }
-    if (data.fedRate?.trend === "down") { pts.recession += 1; signals.push("Fed recortando tasas — señal de alerta") }
+    // Fed cutting interpretation depends on level:
+    //  - Cutting from restrictive territory (>3) = soft-landing/recovery, NOT alert
+    //  - Cutting toward zero (<1) = panic = recession
+    if (data.fedRate?.trend === "down") {
+      if (fed > 3)       { pts.recovery += 2; signals.push(`Fed recortando desde ${fed.toFixed(2)}% — estímulo / soft landing`) }
+      else if (fed < 1)  { pts.recession += 2; signals.push(`Fed recortando con tasas ya en mínimos — pánico`) }
+      else               { pts.recovery += 1 }
+    }
     if (data.fedRate?.trend === "up")   { pts.late += 1 }
   }
 
-  // ── CURVA 10Y-2Y ─────────────────────────────────────────────────────────
+  // ── CURVA 10Y-2Y (con detección de normalización) ────────────────────────
   if (yc !== null) {
+    const trend = data.yieldCurve?.trend
     if (yc < -1.0)       { pts.recession += 2; signals.push(`Curva 10Y-2Y invertida ${yc.toFixed(2)}%`) }
     else if (yc < 0)     { pts.late += 2; signals.push(`Curva 10Y-2Y negativa ${yc.toFixed(2)}%`) }
-    else if (yc < 0.5)   { pts.late += 1 }
+    else if (yc < 0.5) {
+      // Zona crítica: 0-0.5 puede ser "vino de positivo y baja" (late) o
+      // "vino de invertida y sube" (recovery clásico previo a expansión)
+      if (trend === "up")        { pts.recovery += 2; signals.push(`Curva 10Y-2Y normalizándose ${yc.toFixed(2)}% — señal alcista histórica`) }
+      else if (trend === "down") { pts.late += 2; signals.push(`Curva 10Y-2Y aplanándose ${yc.toFixed(2)}%`) }
+      else                       { pts.expansion += 1 }
+    }
     else if (yc > 1.5)   { pts.recovery += 1; pts.expansion += 1; signals.push(`Curva positiva ${yc.toFixed(2)}%`) }
     else                 { pts.expansion += 1 }
   }
@@ -563,11 +579,12 @@ export function detectPhase(data: MacroData): PhaseDetection {
 
   // ── HIGH YIELD SPREAD (apetito de riesgo) ─────────────────────────────────
   if (hySpread !== null) {
-    if (hySpread > 8)    { pts.recession += 3; signals.push(`HY Spread ${hySpread.toFixed(2)}% — mercado anticipa defaults masivos`) }
-    else if (hySpread > 6) { pts.recession += 2; signals.push(`HY Spread elevado ${hySpread.toFixed(2)}% — estrés crediticio`) }
+    if (hySpread > 8)        { pts.recession += 3; signals.push(`HY Spread ${hySpread.toFixed(2)}% — mercado anticipa defaults masivos`) }
+    else if (hySpread > 6)   { pts.recession += 2; signals.push(`HY Spread elevado ${hySpread.toFixed(2)}% — estrés crediticio`) }
     else if (hySpread > 4.5) { pts.late += 2; signals.push(`HY Spread ampliándose ${hySpread.toFixed(2)}%`) }
-    else if (hySpread < 3) { pts.expansion += 2; signals.push(`HY Spread bajo ${hySpread.toFixed(2)}% — apetito de riesgo alto`) }
-    else if (hySpread < 3.5) { pts.expansion += 1 }
+    else if (hySpread > 3.5) { pts.expansion += 1 }  // Zona normal media — se contaba como cero, ahora cuenta
+    else if (hySpread >= 3)  { pts.expansion += 2; signals.push(`HY Spread saludable ${hySpread.toFixed(2)}%`) }
+    else                     { pts.expansion += 2; signals.push(`HY Spread bajo ${hySpread.toFixed(2)}% — apetito de riesgo alto`) }
     if (data.hySpread?.trend === "up")   { pts.late += 1; signals.push("HY Spread ampliándose — alerta crediticia") }
     if (data.hySpread?.trend === "down") { pts.recovery += 1 }
   }
@@ -590,11 +607,14 @@ export function detectPhase(data: MacroData): PhaseDetection {
   }
 
   // ── CONFIANZA DEL CONSUMIDOR ──────────────────────────────────────────────
+  // Nota: confidence ha estado cronicamente baja desde COVID (53-70) sin que la
+  // economía entre en recesión. Suavizamos para que solo niveles realmente
+  // extremos (< 50) marquen recesión.
   if (sentiment !== null) {
-    if (sentiment > 95)  { pts.expansion += 2; signals.push(`Confianza consumidor alta ${sentiment.toFixed(0)}`) }
+    if (sentiment > 95)      { pts.expansion += 2; signals.push(`Confianza consumidor alta ${sentiment.toFixed(0)}`) }
     else if (sentiment > 85) { pts.expansion += 1 }
-    else if (sentiment < 60) { pts.recession += 3; signals.push(`Confianza consumidor muy baja ${sentiment.toFixed(0)} — contracción del gasto`) }
-    else if (sentiment < 70) { pts.recession += 1; signals.push(`Confianza consumidor débil ${sentiment.toFixed(0)}`) }
+    else if (sentiment < 50) { pts.recession += 3; signals.push(`Confianza consumidor extremadamente baja ${sentiment.toFixed(0)} — contracción del gasto`) }
+    else if (sentiment < 65) { pts.late += 1; signals.push(`Confianza consumidor débil ${sentiment.toFixed(0)}`) }
     if (data.consumerSent?.trend === "up")   { pts.recovery += 1 }
     if (data.consumerSent?.trend === "down") { pts.late     += 1 }
   }
