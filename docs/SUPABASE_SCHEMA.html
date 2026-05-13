@@ -1,0 +1,224 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>SUPABASE_SCHEMA</title><style>
+@page { size: Letter; margin: 1in; }
+body {
+  font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.5;
+  color: #1a1a1a;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+}
+h1 { font-size: 22pt; font-weight: 800; margin: 0 0 8pt 0; letter-spacing: -0.5px; border-bottom: 1.5pt solid #1a1a1a; padding-bottom: 6pt; page-break-after: avoid; }
+h2 { font-size: 15pt; font-weight: 700; margin: 22pt 0 8pt 0; color: #1a1a1a; page-break-after: avoid; }
+h3 { font-size: 12pt; font-weight: 700; margin: 14pt 0 6pt 0; color: #2a2a2a; page-break-after: avoid; }
+h4 { font-size: 11pt; font-weight: 600; margin: 10pt 0 4pt 0; }
+p  { margin: 0 0 7pt 0; text-align: left; }
+ul, ol { margin: 4pt 0 8pt 0; padding-left: 20pt; }
+li { margin-bottom: 3pt; }
+hr { border: none; border-top: 0.5pt solid #999; margin: 14pt 0; }
+code {
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 9pt;
+  background: #f2f2f2;
+  padding: 1pt 4pt;
+  border-radius: 3pt;
+  color: #6a3a8a;
+}
+pre {
+  background: #f5f5f5;
+  padding: 8pt 10pt;
+  border-radius: 4pt;
+  overflow-x: auto;
+  page-break-inside: avoid;
+  font-size: 9pt;
+}
+pre code { background: none; padding: 0; color: #1a1a1a; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8pt 0 12pt 0;
+  font-size: 9.5pt;
+  page-break-inside: avoid;
+}
+th { background: #1a1a1a; color: #fff; padding: 5pt 7pt; text-align: left; font-weight: 600; }
+td { padding: 4pt 7pt; border-bottom: 0.4pt solid #ddd; vertical-align: top; }
+tr:nth-child(even) td { background: #fafafa; }
+strong { font-weight: 700; color: #000; }
+em { font-style: italic; }
+a { color: #1a4a8a; text-decoration: none; }
+</style></head><body><h1>Wall — Esquema Supabase normalizado</h1>
+<p>Diseño de base de datos para las funciones actuales de Wall, optimizado para que el cron de snapshots construya un activo de datos auditable y medible.</p>
+<h2>0. Principios de diseño</h2>
+<ol>
+<li><strong><code>symbols</code> como tabla maestra</strong> — todo se referencia por <code>symbol_id</code> (FK), no por ticker string. Permite renombres y delisting sin romper historia.</li>
+<li><strong>Append-only para snapshots</strong> — todo lo que genera el cron es inmutable. No <code>UPDATE</code>, solo <code>INSERT</code> con <code>taken_at</code>. Eso da track record real, no reescrito.</li>
+<li><strong>Particionado lógico por fecha</strong> (<code>taken_at::date</code>) en tablas de alta cardinalidad (<code>gex_snapshots</code>, <code>option_chains</code>, <code>fundamentals_snapshots</code>).</li>
+<li><strong>RLS por <code>user_id</code></strong> en todo lo que es de usuario (portafolios, alertas, diario). Datos de mercado son públicos a usuarios autenticados.</li>
+<li><strong>Cada tabla snapshot tiene un <code>cron_run_id</code></strong> que ata la fila a la ejecución que la generó → trazabilidad total para <code>/data-quality</code>.</li>
+<li><strong>Métricas como tablas, no como código</strong> — los KPIs salen de queries SQL sobre <code>cron_runs</code> + <code>data_quality_log</code>, no de logs de Vercel.</li>
+</ol>
+<hr/>
+<h2>1. Núcleo / Referencia</h2>
+<h3><code>symbols</code></h3>
+<p><strong>Para qué:</strong> ancla universal. Reemplaza el string <code>"AAPL"</code> en todas partes.</p>
+<p><strong>Columnas clave:</strong> <code>id (uuid)</code>, <code>ticker</code>, <code>name</code>, <code>sector_id</code>, <code>industry</code>, <code>exchange</code>, <code>asset_type</code> (<code>stock|etf|fx|future</code>), <code>is_active</code>, <code>delisted_at</code>.</p>
+<h3><code>sectors</code></h3>
+<p><strong>Para qué:</strong> taxonomía sectorial estable para rotación y scoring.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>name</code>, <code>gics_code</code>, <code>etf_proxy_symbol_id</code>.</p>
+<h3><code>users_profile</code></h3>
+<p><strong>Para qué:</strong> extiende <code>auth.users</code> con preferencias de Wall.</p>
+<p><strong>Columnas:</strong> <code>user_id (FK auth.users)</code>, <code>display_name</code>, <code>tier</code> (<code>free|pro|institutional</code>), <code>base_currency</code>, <code>default_horizon_days</code>.</p>
+<hr/>
+<h2>2. Pilar Acciones (Fundamental)</h2>
+<h3><code>fundamentals_snapshots</code></h3>
+<p><strong>Para qué:</strong> estado financiero diario por símbolo. La materia prima del screener.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>taken_at</code>, <code>cron_run_id</code>, <code>price</code>, <code>market_cap</code>, <code>pe</code>, <code>pb</code>, <code>ev_ebitda</code>, <code>roe</code>, <code>roic</code>, <code>fcf_yield</code>, <code>debt_to_equity</code>, <code>revenue_ttm</code>, <code>eps_ttm</code>, <code>dividend_yield</code>, <code>payout_ratio</code>, <code>beta</code>, <code>iv_30d</code>, <code>source</code>.</p>
+<p><strong>Sirve:</strong> <code>/screener</code>, <code>/valoracion</code>, <code>/comparar</code>.</p>
+<h3><code>valuation_scores</code></h3>
+<p><strong>Para qué:</strong> salida de las 7 metodologías de análisis (<code>/api/analysis*</code>).</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>methodology</code> (<code>M1..M7</code>), <code>score</code> (0-100), <code>components (jsonb)</code>, <code>taken_at</code>, <code>cron_run_id</code>.</p>
+<p><strong>Sirve:</strong> screener ordenado, señales, comparador, <code>/track-record</code>.</p>
+<h3><code>signals</code></h3>
+<p><strong>Para qué:</strong> señales discretas con timestamp inmutable. Auditable.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>signal_type</code> (<code>fundamental|technical|gex|macro</code>), <code>direction</code> (<code>long|short|neutral</code>), <code>strength</code> (1-5), <code>rationale (jsonb)</code>, <code>triggered_at</code>, <code>expires_at</code>, <code>closed_at</code>, <code>outcome_return</code>, <code>cron_run_id</code>.</p>
+<p><strong>Sirve:</strong> <code>/senales</code>, <code>/track-record</code>, alertas.</p>
+<h3><code>sector_scores</code></h3>
+<p><strong>Para qué:</strong> scoring sectorial diario para rotación top-down.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>sector_id</code>, <code>score</code>, <code>momentum</code>, <code>valuation</code>, <code>taken_at</code>.</p>
+<p><strong>Sirve:</strong> <code>/sectores</code>, <code>/rotacion</code>, screener filtrado por sector caliente.</p>
+<h3><code>cycle_classifications</code></h3>
+<p><strong>Para qué:</strong> régimen macro del día (expansion/peak/contraction/trough).</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>taken_at</code>, <code>regime</code>, <code>confidence</code>, <code>signals (jsonb)</code>.</p>
+<p><strong>Sirve:</strong> <code>/ciclos</code>, scoring contextual.</p>
+<hr/>
+<h2>3. Pilar Institucional (Opciones / GEX)</h2>
+<h3><code>option_chains</code></h3>
+<p><strong>Para qué:</strong> cadena cruda de opciones por símbolo y expiración. Materia prima de todo lo institucional.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>expiration</code>, <code>strike</code>, <code>option_type</code> (<code>call|put</code>), <code>bid</code>, <code>ask</code>, <code>last</code>, <code>iv</code>, <code>delta</code>, <code>gamma</code>, <code>theta</code>, <code>vega</code>, <code>open_interest</code>, <code>volume</code>, <code>taken_at</code>, <code>cron_run_id</code>.</p>
+<p><strong>Sirve:</strong> <code>/gex</code>, <code>/gamma-map</code>, <code>/scanner-pro</code>, S/R opcional.</p>
+<h3><code>gex_snapshots</code></h3>
+<p><strong>Para qué:</strong> GEX agregado por símbolo + spot. Es la vista resumen que más se consulta.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>taken_at</code>, <code>spot_price</code>, <code>total_gamma</code>, <code>call_gamma</code>, <code>put_gamma</code>, <code>dealer_position</code>, <code>flip_point</code>, <code>zero_gamma</code>, <code>cron_run_id</code>.</p>
+<p><strong>Sirve:</strong> dashboards GEX, scanner, alertas.</p>
+<h3><code>gamma_map</code></h3>
+<p><strong>Para qué:</strong> GEX por strike — granularidad para el heatmap 2D.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>expiration</code>, <code>strike</code>, <code>net_gex</code>, <code>call_gex</code>, <code>put_gex</code>, <code>taken_at</code>, <code>cron_run_id</code>.</p>
+<p><strong>Sirve:</strong> <code>/gamma-map</code>, <code>/api/heatmap2d</code>.</p>
+<h3><code>support_resistance_levels</code></h3>
+<p><strong>Para qué:</strong> niveles S/R derivados de gamma walls / open interest.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>level_price</code>, <code>level_type</code> (<code>support|resistance</code>), <code>strength</code>, <code>source</code> (<code>gex|oi|technical</code>), <code>taken_at</code>.</p>
+<p><strong>Sirve:</strong> <code>/api/sr</code>, charts.</p>
+<h3><code>scanner_results</code></h3>
+<p><strong>Para qué:</strong> resultado diario del scanner (unusual options, gamma squeeze candidates).</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>taken_at</code>, <code>symbol_id</code>, <code>scan_type</code>, <code>score</code>, <code>metrics (jsonb)</code>, <code>cron_run_id</code>.</p>
+<h3><code>rotation_signals</code></h3>
+<p><strong>Para qué:</strong> flujo entre sectores derivado de opciones + ETFs.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>from_sector_id</code>, <code>to_sector_id</code>, <code>strength</code>, <code>taken_at</code>.</p>
+<hr/>
+<h2>4. Pilar Portafolio</h2>
+<h3><code>portfolios</code></h3>
+<p><strong>Para qué:</strong> un usuario puede tener varios portafolios (real, paper, IRA, etc.).</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>user_id</code>, <code>name</code>, <code>type</code> (<code>real|paper</code>), <code>base_currency</code>, <code>broker</code>, <code>created_at</code>.</p>
+<h3><code>positions</code></h3>
+<p><strong>Para qué:</strong> estado actual derivado de <code>transactions</code>. <strong>Materializada con trigger</strong>, no escrita a mano.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>portfolio_id</code>, <code>symbol_id</code>, <code>qty</code>, <code>avg_cost</code>, <code>opened_at</code>, <code>last_updated_at</code>.</p>
+<h3><code>transactions</code></h3>
+<p><strong>Para qué:</strong> <strong>ledger inmutable</strong>. Fuente de verdad del portafolio. No se edita, se reversa con otra transacción.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>portfolio_id</code>, <code>symbol_id</code>, <code>tx_type</code> (<code>buy|sell|dividend|split|fee</code>), <code>qty</code>, <code>price</code>, <code>fee</code>, <code>executed_at</code>, <code>notes</code>.</p>
+<h3><code>watchlist</code></h3>
+<p><strong>Columnas:</strong> <code>id</code>, <code>user_id</code>, <code>symbol_id</code>, <code>added_at</code>, <code>notes</code>.</p>
+<h3><code>alerts</code></h3>
+<p><strong>Columnas:</strong> <code>id</code>, <code>user_id</code>, <code>symbol_id</code>, <code>condition</code> (<code>price_above|gex_flip|signal_fires|...</code>), <code>threshold (jsonb)</code>, <code>channel</code> (<code>email|webhook</code>), <code>is_active</code>, <code>created_at</code>.</p>
+<h3><code>alert_triggers</code></h3>
+<p><strong>Para qué:</strong> log de cada disparo. Auditable.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>alert_id</code>, <code>fired_at</code>, <code>payload (jsonb)</code>, <code>delivered</code>, <code>delivery_attempts</code>.</p>
+<h3><code>diario_entries</code></h3>
+<p><strong>Para qué:</strong> journaling estructurado — clave para mejorar como inversor.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>user_id</code>, <code>symbol_id</code>, <code>entry_date</code>, <code>thesis</code>, <code>sentiment</code> (-2..+2), <code>conviction</code> (1-10), <code>attachments (jsonb)</code>, <code>linked_signal_id</code>.</p>
+<h3><code>prospectiva_theses</code></h3>
+<p><strong>Para qué:</strong> tesis forward-looking con horizonte y target. Se cierra al alcanzarse o expirar.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>user_id</code>, <code>symbol_id</code>, <code>target_price</code>, <code>horizon_days</code>, <code>conviction</code>, <code>entry_thesis</code>, <code>opened_at</code>, <code>closed_at</code>, <code>outcome</code> (<code>hit|miss|expired</code>), <code>realized_return</code>.</p>
+<hr/>
+<h2>5. Pilar Macro FX</h2>
+<h3><code>cot_reports</code></h3>
+<p><strong>Para qué:</strong> Commitment of Traders semanal por contrato. Posicionamiento de manos fuertes.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>contract_code</code>, <code>report_date</code>, <code>commercial_long</code>, <code>commercial_short</code>, <code>non_commercial_long</code>, <code>non_commercial_short</code>, <code>open_interest</code>, <code>cron_run_id</code>.</p>
+<h3><code>fred_series</code></h3>
+<p><strong>Columnas:</strong> <code>id</code>, <code>series_id</code> (FRED code), <code>name</code>, <code>units</code>, <code>frequency</code>, <code>category</code>.</p>
+<h3><code>fred_observations</code></h3>
+<p><strong>Columnas:</strong> <code>id</code>, <code>series_id (FK)</code>, <code>obs_date</code>, <code>value</code>, <code>fetched_at</code>, <code>cron_run_id</code>.</p>
+<p><strong>Sirve:</strong> <code>/macro-fx</code>, ciclos, contexto.</p>
+<h3><code>fx_rates</code></h3>
+<p><strong>Columnas:</strong> <code>id</code>, <code>base</code>, <code>quote</code>, <code>rate</code>, <code>taken_at</code>, <code>cron_run_id</code>.</p>
+<hr/>
+<h2>6. Pilar Empresa (cualitativo)</h2>
+<h3><code>company_profile</code></h3>
+<p><strong>Columnas:</strong> <code>symbol_id (PK)</code>, <code>description</code>, <code>employees</code>, <code>hq_country</code>, <code>ceo</code>, <code>founded</code>, <code>website</code>.</p>
+<h3><code>foda_analyses</code></h3>
+<p><strong>Para qué:</strong> SWOT versionado por símbolo. Cada generación nueva crea otra fila — historial.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>strengths (jsonb)</code>, <code>weaknesses (jsonb)</code>, <code>opportunities (jsonb)</code>, <code>threats (jsonb)</code>, <code>generated_at</code>, <code>source</code> (<code>ai|manual</code>).</p>
+<h3><code>supply_chain_links</code></h3>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>partner_symbol_id</code>, <code>relation</code> (<code>supplier|customer</code>), <code>concentration_pct</code>, <code>source</code>, <code>as_of</code>.</p>
+<h3><code>value_chain_segments</code></h3>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>segment_name</code>, <code>position</code> (<code>upstream|midstream|downstream</code>), <code>margin_pct</code>, <code>as_of</code>.</p>
+<h3><code>news_cache</code></h3>
+<p><strong>Columnas:</strong> <code>id</code>, <code>symbol_id</code>, <code>headline</code>, <code>summary</code>, <code>url</code>, <code>source</code>, <code>published_at</code>, <code>sentiment</code>, <code>fetched_at</code>.</p>
+<hr/>
+<h2>7. Transversal / Auditoría (el activo estratégico)</h2>
+<h3><code>cron_runs</code></h3>
+<p><strong>Para qué:</strong> registro de cada ejecución del cron. <strong>De aquí salen casi todos los KPIs.</strong></p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>job_name</code>, <code>started_at</code>, <code>finished_at</code>, <code>status</code> (<code>success|partial|failed</code>), <code>rows_inserted</code>, <code>rows_failed</code>, <code>error_summary</code>, <code>duration_ms</code>.</p>
+<h3><code>data_quality_log</code></h3>
+<p><strong>Para qué:</strong> un registro por (job × símbolo × campo) cuando algo está fuera de rango o falta.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>cron_run_id</code>, <code>symbol_id</code>, <code>check_name</code>, <code>severity</code> (<code>info|warn|error</code>), <code>expected (jsonb)</code>, <code>actual (jsonb)</code>, <code>created_at</code>.</p>
+<p><strong>Sirve:</strong> <code>/data-quality</code>.</p>
+<h3><code>api_usage_log</code></h3>
+<p><strong>Para qué:</strong> controlar Yahoo Finance / FRED / proveedores. Defensa contra rate limits.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>provider</code>, <code>endpoint</code>, <code>called_at</code>, <code>status_code</code>, <code>latency_ms</code>, <code>cron_run_id</code>.</p>
+<h3><code>track_record</code></h3>
+<p><strong>Para qué:</strong> <strong>el activo más valioso del producto</strong>. Cada tesis/señal cerrada con outcome real.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>user_id</code> (nullable: global vs por usuario), <code>symbol_id</code>, <code>signal_id</code> o <code>thesis_id</code>, <code>entry_date</code>, <code>entry_price</code>, <code>exit_date</code>, <code>exit_price</code>, <code>return_pct</code>, <code>benchmark_return_pct</code>, <code>alpha_pct</code>, <code>methodology</code>, <code>horizon_days</code>, <code>notes</code>.</p>
+<h3><code>backtest_runs</code></h3>
+<p><strong>Para qué:</strong> simulaciones reproducibles.</p>
+<p><strong>Columnas:</strong> <code>id</code>, <code>user_id</code>, <code>strategy_name</code>, <code>config (jsonb)</code>, <code>start_date</code>, <code>end_date</code>, <code>cagr</code>, <code>sharpe</code>, <code>max_dd</code>, <code>trades_count</code>, <code>created_at</code>.</p>
+<h3><code>snapshots_m1..m7</code></h3>
+<p><strong>Decisión arquitectónica:</strong> <strong>NO crear 7 tablas separadas</strong>. Una sola tabla <code>methodology_snapshots</code> con columna <code>methodology M1..M7</code>. Las 7 tablas separadas son una trampa de duplicación de código. (Esto contradice lo que sugiere el path <code>/api/snapshots/m1..m7</code> — el endpoint puede seguir separado, pero la tabla destino es una.)</p>
+<hr/>
+<h2>8. Resultados medibles (KPIs salida del cron)</h2>
+<p>Estos son los números que aparecen en <code>/data-quality</code> y que justifican que el cron está creando valor. <strong>Todos calculables con SQL puro sobre las tablas anteriores.</strong></p>
+<table><thead><tr><th>KPI</th><th>Query base</th><th>Meta inicial</th></tr></thead><tbody>
+<tr><td><strong>Cobertura diaria</strong></td><td><code>% symbols con fundamentals_snapshot hoy / total active</code></td><td>≥ 98%</td></tr>
+<tr><td><strong>Latencia post-close</strong></td><td><code>median(finished_at - market_close)</code> en <code>cron_runs</code></td><td>&lt; 15 min</td></tr>
+<tr><td><strong>Tasa de error API</strong></td><td><code>count(api_usage_log where status_code != 200) / total</code></td><td>&lt; 1%</td></tr>
+<tr><td><strong>Anomalías por día</strong></td><td><code>count(data_quality_log where severity='error')</code></td><td>&lt; 5</td></tr>
+<tr><td><strong>Símbolos stale</strong></td><td><code>count(symbols where last snapshot &amp;gt; 48h)</code></td><td>0</td></tr>
+<tr><td><strong>Hit rate de señales</strong></td><td><code>% signals closed donde outcome_return &amp;gt; 0</code> (30/90/365d)</td><td>&gt; 55% (vs 50% baseline)</td></tr>
+<tr><td><strong>Alpha rolling 90d</strong></td><td><code>avg(track_record.alpha_pct) últimos 90d</code></td><td>&gt; 0</td></tr>
+<tr><td><strong>Sharpe del backtest agregado</strong></td><td>desde <code>backtest_runs</code></td><td>&gt; 1.0</td></tr>
+<tr><td><strong>Tiempo medio de generación</strong></td><td><code>avg(duration_ms)</code> por job</td><td>tendencia estable o ↓</td></tr>
+<tr><td><strong>Costo de API por día</strong></td><td>desde <code>api_usage_log</code> × pricing por proveedor</td><td>&lt; umbral por tier</td></tr>
+</tbody></table>
+<p><strong>Vista materializada sugerida:</strong> <code>data_quality_daily</code> que reagrega lo anterior por día → eso es lo que pinta <code>/data-quality</code> sin queries pesadas en runtime.</p>
+<hr/>
+<h2>9. Orden de migración recomendado</h2>
+<ol>
+<li><code>symbols</code>, <code>sectors</code>, <code>users_profile</code> (referencia)</li>
+<li><code>cron_runs</code>, <code>data_quality_log</code>, <code>api_usage_log</code> (instrumentación — <strong>antes que cualquier dato</strong>)</li>
+<li><code>fundamentals_snapshots</code>, <code>valuation_scores</code>, <code>sector_scores</code>, <code>cycle_classifications</code> (Acciones)</li>
+<li><code>option_chains</code>, <code>gex_snapshots</code>, <code>gamma_map</code>, <code>scanner_results</code>, <code>support_resistance_levels</code> (Institucional)</li>
+<li><code>cot_reports</code>, <code>fred_series</code>, <code>fred_observations</code>, <code>fx_rates</code> (Macro)</li>
+<li><code>portfolios</code>, <code>transactions</code>, <code>positions</code> (trigger), <code>watchlist</code>, <code>alerts</code>, <code>alert_triggers</code>, <code>diario_entries</code>, <code>prospectiva_theses</code> (Usuario)</li>
+<li><code>company_profile</code>, <code>foda_analyses</code>, <code>supply_chain_links</code>, <code>value_chain_segments</code>, <code>news_cache</code> (Cualitativo)</li>
+<li><code>signals</code>, <code>track_record</code>, <code>backtest_runs</code> (Auditoría final — depende de las anteriores)</li>
+</ol>
+<p><strong>Regla de oro:</strong> la instrumentación (paso 2) va antes que los datos. Si llega el primer cron y no hay <code>cron_runs</code>, no sabes qué falló.</p>
+<hr/>
+<h2>10. Decisiones pendientes (necesito tu input)</h2>
+<ul>
+<li><strong>¿Multi-portafolio desde el día 1 o un solo portafolio por usuario?</strong> Afecta <code>positions</code> y <code>transactions</code>.</li>
+<li><strong>¿Track record global (señales públicas auditables) o solo por usuario?</strong> Si es global, es marketing orgánico permanente.</li>
+<li><strong>¿Particionado nativo Postgres o solo índices por <code>taken_at</code>?</strong> Importante si pasamos de 10k a 5M filas/día en <code>option_chains</code>.</li>
+<li><strong>¿Borramos snapshots viejos a &gt;2 años o los archivamos en cold storage?</strong> El costo Supabase escala con storage.</li>
+</ul>
+</body></html>

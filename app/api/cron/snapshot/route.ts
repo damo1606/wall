@@ -1,127 +1,196 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-
-// Cron diario que captura el estado de Wall y lo persiste en Supabase.
-// Trigger: vercel.json (0 21 * * * = 21:00 UTC = 4-5pm ET cierre de mercado)
-// Auth: header `Authorization: Bearer ${CRON_SECRET}` (Vercel lo inyecta automáticamente)
+import { supabaseServer, type TypedClient } from "@/lib/supabase"
 
 export const dynamic = "force-dynamic"
-export const maxDuration = 300 // 5 min — scanner-pro puede tardar
+export const maxDuration = 300
 
-async function safeFetch<T>(url: string): Promise<T | null> {
+const JOB_NAME = "snapshot_daily"
+
+type FetchResult<T> = { data: T | null; status: number; latencyMs: number; ok: boolean }
+
+async function timedFetch<T>(url: string): Promise<FetchResult<T>> {
+  const t0 = Date.now()
   try {
     const res = await fetch(url, { cache: "no-store" })
-    if (!res.ok) return null
-    return await res.json() as T
-  } catch { return null }
+    const latencyMs = Date.now() - t0
+    if (!res.ok) return { data: null, status: res.status, latencyMs, ok: false }
+    return { data: await res.json() as T, status: res.status, latencyMs, ok: true }
+  } catch {
+    return { data: null, status: 0, latencyMs: Date.now() - t0, ok: false }
+  }
+}
+
+async function logApi(db: TypedClient, runId: string, provider: string, endpoint: string, r: FetchResult<unknown>) {
+  await db.from("api_usage_log").insert({
+    provider, endpoint, status_code: r.status, latency_ms: r.latencyMs, cron_run_id: runId,
+  })
+}
+
+async function logDqError(db: TypedClient, runId: string, check: string, actual: unknown) {
+  await db.from("data_quality_log").insert({
+    cron_run_id: runId, check_name: check, severity: "error", actual: actual as never,
+  })
+}
+
+function mapRegime(phase: string | null | undefined): "expansion" | "peak" | "contraction" | "trough" | null {
+  if (!phase) return null
+  const p = phase.toLowerCase()
+  if (/(expan|grow|recov|early)/.test(p)) return "expansion"
+  if (/(peak|mid|late)/.test(p)) return "peak"
+  if (/(contract|reces|crisis|panico|pánico)/.test(p)) return "contraction"
+  if (/(trough|bottom|depres)/.test(p)) return "trough"
+  return null
+}
+
+async function upsertSymbolsByTicker(db: TypedClient, tickers: string[]): Promise<Map<string, string>> {
+  if (tickers.length === 0) return new Map()
+  const unique = Array.from(new Set(tickers.filter(Boolean)))
+  await db.from("symbols").upsert(
+    unique.map(t => ({ ticker: t, name: t, asset_type: "stock" as const })),
+    { onConflict: "ticker", ignoreDuplicates: true }
+  )
+  const { data } = await db.from("symbols").select("id, ticker").in("ticker", unique)
+  const map = new Map<string, string>()
+  for (const row of data ?? []) map.set(row.ticker, row.id)
+  return map
 }
 
 export async function GET(req: NextRequest) {
-  // 1) Verificar autorización (Vercel inyecta el header en cron jobs)
   const auth = req.headers.get("authorization")
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
+  const db = supabaseServer()
+  const startedAt = Date.now()
+
+  const { data: runRow, error: runErr } = await db
+    .from("cron_runs")
+    .insert({ job_name: JOB_NAME, status: "running" })
+    .select("id")
+    .single()
+
+  if (runErr || !runRow) {
+    return NextResponse.json({ error: "cron_runs insert failed", detail: runErr?.message }, { status: 500 })
+  }
+  const runId = runRow.id
+
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? `https://${req.headers.get("host")}`
+  let rowsInserted = 0
+  let rowsFailed = 0
   const errors: string[] = []
 
-  // 2) Fetch en paralelo de las 3 fuentes
   const [macro, sectors, scannerPro] = await Promise.all([
-    safeFetch<Record<string, unknown>>(`${base}/api/macro`).catch(e => { errors.push(`macro: ${e}`); return null }),
-    safeFetch<unknown>(`${base}/api/sectors-etf`).catch(e => { errors.push(`sectors: ${e}`); return null }),
-    safeFetch<{ rows: unknown[]; m6Regime?: string; m6Vix?: number }>(
+    timedFetch<{ detection?: { phase?: string; confidence?: number }; vix?: number; vix3m?: number }>(`${base}/api/macro`),
+    timedFetch<unknown>(`${base}/api/sectors-etf`),
+    timedFetch<{ rows: Array<Record<string, unknown>>; m6Regime?: string; m6Vix?: number }>(
       `${base}/api/scanner-pro?universe=sp500&limit=50&minBuyScore=0`
-    ).catch(e => { errors.push(`scanner-pro: ${e}`); return null }),
+    ),
   ])
 
-  if (!macro && !sectors && !scannerPro) {
-    return NextResponse.json({ error: "All sources failed", errors }, { status: 502 })
+  await Promise.all([
+    logApi(db, runId, "wall-internal", "/api/macro",        macro),
+    logApi(db, runId, "wall-internal", "/api/sectors-etf",  sectors),
+    logApi(db, runId, "wall-internal", "/api/scanner-pro",  scannerPro),
+  ])
+
+  if (!macro.ok)      { errors.push("macro");      await logDqError(db, runId, "fetch_macro_failed", { status: macro.status }) }
+  if (!sectors.ok)    { errors.push("sectors");    await logDqError(db, runId, "fetch_sectors_failed", { status: sectors.status }) }
+  if (!scannerPro.ok) { errors.push("scannerPro"); await logDqError(db, runId, "fetch_scanner_pro_failed", { status: scannerPro.status }) }
+
+  const macroPhase      = macro.data?.detection?.phase ?? null
+  const macroConfidence = macro.data?.detection?.confidence ?? null
+  const vix             = macro.data?.vix ?? null
+  const vix3m           = macro.data?.vix3m ?? null
+  const m6Regime        = scannerPro.data?.m6Regime ?? null
+  const m6Vix           = scannerPro.data?.m6Vix ?? vix
+  const firstRow        = scannerPro.data?.rows?.[0] as { m6FearScore?: number } | undefined
+  const fearScore       = firstRow?.m6FearScore ?? null
+
+  const mappedRegime = mapRegime(macroPhase) ?? mapRegime(m6Regime)
+  if (mappedRegime) {
+    const { error } = await db.from("cycle_classifications").insert({
+      regime: mappedRegime,
+      confidence: macroConfidence,
+      signals: { raw_macro_phase: macroPhase, raw_m6_regime: m6Regime, vix, vix3m, m6Vix, fearScore } as never,
+      cron_run_id: runId,
+    })
+    if (error) { rowsFailed++; errors.push(`cycle: ${error.message}`) } else { rowsInserted++ }
+  } else if (macroPhase || m6Regime) {
+    await logDqError(db, runId, "regime_unmappable", { macroPhase, m6Regime })
   }
 
-  // 3) Extraer headline metrics del macro
-  const macroPhase      = (macro?.detection as { phase?: string } | undefined)?.phase ?? null
-  const macroConfidence = (macro?.detection as { confidence?: number } | undefined)?.confidence ?? null
-  const vix             = macro?.vix as number | null ?? null
-  const vix3m           = macro?.vix3m as number | null ?? null
+  const rows = scannerPro.data?.rows ?? []
+  if (rows.length > 0) {
+    const tickers = rows.map(r => (r.symbol as string) || "").filter(Boolean)
+    const symbolMap = await upsertSymbolsByTicker(db, tickers)
 
-  // 4) Extraer régimen y fear score del scanner-pro (M6 global)
-  const regime    = scannerPro?.m6Regime ?? null
-  const m6Vix     = scannerPro?.m6Vix ?? vix
-  const firstRow  = (scannerPro?.rows?.[0] as { m6FearScore?: number } | undefined)
-  const fearScore = firstRow?.m6FearScore ?? null
+    const methodologyRows = rows
+      .map(r => {
+        const ticker = r.symbol as string
+        const symbolId = ticker ? symbolMap.get(ticker) : undefined
+        if (!symbolId) return null
+        return {
+          methodology: "M6" as const,
+          symbol_id: symbolId,
+          payload: r as never,
+          cron_run_id: runId,
+        }
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
 
-  // 5) Insertar snapshot
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  )
-
-  const today = new Date().toISOString().split("T")[0]
-
-  const { error } = await supabase
-    .from("daily_snapshots")
-    .upsert({
-      snapshot_date:    today,
-      macro_phase:      macroPhase,
-      macro_confidence: macroConfidence,
-      vix:              m6Vix,
-      vix3m,
-      fear_score:       fearScore,
-      regime,
-      macro_indicators: macro,
-      sectors,
-      sore_signals:     scannerPro?.rows ?? [],
-      meta: {
-        universe: "sp500",
-        limit: 50,
-        errors,
-        sources: {
-          macro:       macro       !== null,
-          sectors:     sectors     !== null,
-          scanner_pro: scannerPro  !== null,
-        },
-      },
-    }, { onConflict: "snapshot_date" })
-
-  if (error) {
-    return NextResponse.json({ error: error.message, errors }, { status: 500 })
+    if (methodologyRows.length > 0) {
+      const { error } = await db.from("methodology_snapshots").insert(methodologyRows)
+      if (error) { rowsFailed += methodologyRows.length; errors.push(`methodology: ${error.message}`) }
+      else       { rowsInserted += methodologyRows.length }
+    }
   }
 
-  // 6) Discord webhook: notifica si hay GO signals o régimen extremo
+  const durationMs = Date.now() - startedAt
+  const allOk = macro.ok && sectors.ok && scannerPro.ok && errors.length === 0
+  const someOk = macro.ok || sectors.ok || scannerPro.ok
+  const status: "success" | "partial" | "failed" = allOk ? "success" : someOk ? "partial" : "failed"
+
+  await db.from("cron_runs").update({
+    finished_at:   new Date().toISOString(),
+    status,
+    rows_inserted: rowsInserted,
+    rows_failed:   rowsFailed,
+    duration_ms:   durationMs,
+    error_summary: errors.length > 0 ? errors.join(" | ") : null,
+  }).eq("id", runId)
+
   const webhook = process.env.DISCORD_WEBHOOK_URL
-  if (webhook) {
+  if (webhook && rows.length > 0) {
     type SoreRow = { symbol: string; soreGate?: string; soreCSS?: number; soreStrategy?: string }
-    const rows = (scannerPro?.rows ?? []) as SoreRow[]
-    const goSignals = rows
+    const goSignals = (rows as SoreRow[])
       .filter(r => r.soreGate === "GO")
       .sort((a, b) => (b.soreCSS ?? 0) - (a.soreCSS ?? 0))
       .slice(0, 10)
-    const extremeRegime = regime === "PÁNICO AGUDO" || regime === "CRISIS SISTÉMICA"
+    const extremeRegime = m6Regime === "PÁNICO AGUDO" || m6Regime === "CRISIS SISTÉMICA"
 
     if (goSignals.length > 0 || extremeRegime) {
+      const today = new Date().toISOString().split("T")[0]
       const goList = goSignals.length > 0
         ? goSignals.map(r => `• **${r.symbol}** CSS=${r.soreCSS} → ${r.soreStrategy}`).join("\n")
         : "_Sin GO signals_"
-      const regimeAlert = extremeRegime ? `\n\n🚨 **RÉGIMEN ${regime}** — gatillo suspendido` : ""
-      const content = `**SORE Snapshot ${today}** · Régimen: ${regime} · VIX ${m6Vix?.toFixed(2)} · Fear ${fearScore}\n\n${goList}${regimeAlert}`
-
+      const regimeAlert = extremeRegime ? `\n\n🚨 **RÉGIMEN ${m6Regime}** — gatillo suspendido` : ""
+      const content = `**SORE Snapshot ${today}** · Régimen: ${m6Regime} · VIX ${m6Vix?.toFixed(2)} · Fear ${fearScore}\n\n${goList}${regimeAlert}`
       fetch(webhook, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content }),
-      }).catch(e => errors.push(`webhook: ${(e as Error).message}`))
+      }).catch(() => {})
     }
   }
 
   return NextResponse.json({
-    ok: true,
-    date: today,
-    phase: macroPhase,
-    regime,
-    vix: m6Vix,
-    fearScore,
-    rowsSnapshotted: scannerPro?.rows?.length ?? 0,
+    ok: status !== "failed",
+    runId, status,
+    phase: macroPhase, mappedRegime,
+    m6Regime, m6Vix, fearScore,
+    rowsInserted, rowsFailed,
+    durationMs,
     warnings: errors,
   })
 }

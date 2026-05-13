@@ -18,17 +18,36 @@ const SECTORS = [
 
 type Tab = "supply" | "value" | "foda"
 
+// Tab configuration with metadata
+const TABS: { id: Tab; label: string; apiPath: string }[] = [
+  { id: "supply", label: "⛓️ Suministros", apiPath: "/api/cadenas/supply-chain" },
+  { id: "value",  label: "💎 Valores", apiPath: "/api/cadenas/value-chain" },
+  { id: "foda",   label: "📊 FODA", apiPath: "/api/cadenas/foda" },
+]
+
+// Impact level color mapping (supports es/en variants)
+const IMPACT_COLORS: Record<string, string> = {
+  // High/Alto
+  alto: "bg-red-900/40 text-red-300",
+  alta: "bg-red-900/40 text-red-300",
+  high: "bg-red-900/40 text-red-300",
+  // Medium/Medio
+  medio: "bg-yellow-900/40 text-yellow-300",
+  media: "bg-yellow-900/40 text-yellow-300",
+  mediano: "bg-yellow-900/40 text-yellow-300",
+  medium: "bg-yellow-900/40 text-yellow-300",
+  // Low/Bajo
+  bajo: "bg-green-900/40 text-green-300",
+  baja: "bg-green-900/40 text-green-300",
+  low: "bg-green-900/40 text-green-300",
+  // Time horizons
+  corto: "bg-green-900/40 text-green-300",
+  largo: "bg-blue-900/40 text-blue-300",
+}
+
 type ImpactBadgeProps = { v: string }
 function ImpactBadge({ v }: ImpactBadgeProps) {
-  const map: Record<string, string> = {
-    alto: "bg-red-900/40 text-red-300", alta: "bg-red-900/40 text-red-300",
-    medio: "bg-yellow-900/40 text-yellow-300", media: "bg-yellow-900/40 text-yellow-300",
-    bajo: "bg-green-900/40 text-green-300", baja: "bg-green-900/40 text-green-300",
-    corto: "bg-green-900/40 text-green-300",
-    mediano: "bg-yellow-900/40 text-yellow-300",
-    largo: "bg-blue-900/40 text-blue-300",
-  }
-  const cls = map[v?.toLowerCase()] ?? "bg-gray-800 text-gray-400"
+  const cls = IMPACT_COLORS[v?.toLowerCase()] ?? "bg-gray-800 text-gray-400"
   return <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${cls}`}>{v}</span>
 }
 
@@ -202,45 +221,57 @@ function FodaResult({ d }: { d: Record<string, unknown> }) {
   )
 }
 
-export default function CadenasPage() {
-  const [sector, setSector] = useState("")
-  const [subsector, setSubsector] = useState("")
-  const [activeTab, setActiveTab] = useState<Tab | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<Record<string, unknown> | null>(null)
-  const [proveedor, setProveedor] = useState("")
-  const [error, setError] = useState("")
+// API URL lookup from TABS configuration
+const API_URLS: Record<Tab, string> = Object.fromEntries(
+  TABS.map(t => [t.id, t.apiPath])
+) as Record<Tab, string>
 
-  const urls: Record<Tab, string> = {
-    supply: "/api/cadenas/supply-chain",
-    value:  "/api/cadenas/value-chain",
-    foda:   "/api/cadenas/foda",
-  }
+interface AnalysisState {
+  sector: string
+  subsector: string
+  activeTab: Tab | null
+  loading: boolean
+  result: Record<string, unknown> | null
+  proveedor: string
+  error: string
+}
+
+export default function CadenasPage() {
+  const [state, setState] = useState<AnalysisState>({
+    sector: "",
+    subsector: "",
+    activeTab: null,
+    loading: false,
+    result: null,
+    proveedor: "",
+    error: "",
+  })
 
   async function runAnalysis(tab: Tab) {
-    if (!sector.trim() || !subsector.trim()) {
-      setError("Ingresa sector y subsector")
+    if (!state.sector.trim() || !state.subsector.trim()) {
+      setState(prev => ({ ...prev, error: "Ingresa sector y subsector" }))
       return
     }
-    setActiveTab(tab)
-    setLoading(true)
-    setError("")
-    setResult(null)
+
+    setState(prev => ({ ...prev, activeTab: tab, loading: true, error: "", result: null }))
 
     try {
-      const res = await fetch(urls[tab], {
+      const res = await fetch(API_URLS[tab], {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sector: sector.trim(), subsector: subsector.trim() }),
+        body: JSON.stringify({
+          sector: state.sector.trim(),
+          subsector: state.subsector.trim()
+        }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? "Error desconocido")
-      setResult(json.data)
-      setProveedor(json.proveedor)
+      setState(prev => ({ ...prev, result: json.data, proveedor: json.proveedor }))
     } catch (e) {
-      setError((e as Error).message)
+      const msg = e instanceof Error ? e.message : "Error desconocido"
+      setState(prev => ({ ...prev, error: msg }))
     } finally {
-      setLoading(false)
+      setState(prev => ({ ...prev, loading: false }))
     }
   }
 
@@ -261,8 +292,8 @@ export default function CadenasPage() {
             <div>
               <label className="text-xs text-gray-500 font-medium mb-1.5 block">SECTOR</label>
               <input
-                value={sector}
-                onChange={e => setSector(e.target.value)}
+                value={state.sector}
+                onChange={e => setState(prev => ({ ...prev, sector: e.target.value }))}
                 placeholder="ej. Technology"
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition"
               />
@@ -270,8 +301,8 @@ export default function CadenasPage() {
             <div>
               <label className="text-xs text-gray-500 font-medium mb-1.5 block">SUBSECTOR</label>
               <input
-                value={subsector}
-                onChange={e => setSubsector(e.target.value)}
+                value={state.subsector}
+                onChange={e => setState(prev => ({ ...prev, subsector: e.target.value }))}
                 placeholder="ej. Semiconductores"
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition"
               />
@@ -283,8 +314,8 @@ export default function CadenasPage() {
             {SECTORS.map(s => (
               <button
                 key={s.nombre}
-                onClick={() => setSector(s.nombre)}
-                className={`text-xs px-2.5 py-1 rounded-full transition ${sector === s.nombre ? "bg-blue-600 text-white" : "bg-gray-800 hover:bg-gray-700 text-gray-400"}`}
+                onClick={() => setState(prev => ({ ...prev, sector: s.nombre }))}
+                className={`text-xs px-2.5 py-1 rounded-full transition ${state.sector === s.nombre ? "bg-blue-600 text-white" : "bg-gray-800 hover:bg-gray-700 text-gray-400"}`}
               >
                 {s.label}
               </button>
@@ -294,39 +325,35 @@ export default function CadenasPage() {
 
         {/* Analysis tabs */}
         <div className="flex gap-2">
-          {([
-            { id: "supply", label: "⛓️ Suministros" },
-            { id: "value",  label: "💎 Valores" },
-            { id: "foda",   label: "📊 FODA" },
-          ] as { id: Tab; label: string }[]).map(tab => (
+          {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => runAnalysis(tab.id)}
-              disabled={loading}
+              disabled={state.loading}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                activeTab === tab.id
+                state.activeTab === tab.id
                   ? "bg-blue-600 text-white"
                   : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
               } disabled:opacity-50`}
             >
-              {loading && activeTab === tab.id ? "Analizando..." : tab.label}
+              {state.loading && state.activeTab === tab.id ? "Analizando..." : tab.label}
             </button>
           ))}
 
-          {proveedor && !loading && (
-            <span className={`ml-auto self-center text-xs font-medium px-3 py-1 rounded-full text-white ${proveedor === "gemini" ? "bg-blue-600" : "bg-orange-600"}`}>
-              {proveedor === "gemini" ? "Google Gemini" : "Groq LLaMA"}
+          {state.proveedor && !state.loading && (
+            <span className={`ml-auto self-center text-xs font-medium px-3 py-1 rounded-full text-white ${state.proveedor === "gemini" ? "bg-blue-600" : "bg-orange-600"}`}>
+              {state.proveedor === "gemini" ? "Google Gemini" : "Groq LLaMA"}
             </span>
           )}
         </div>
 
         {/* Error */}
-        {error && (
-          <div className="bg-red-900/20 border border-red-800/30 rounded-xl p-4 text-sm text-red-400">{error}</div>
+        {state.error && (
+          <div className="bg-red-900/20 border border-red-800/30 rounded-xl p-4 text-sm text-red-400">{state.error}</div>
         )}
 
         {/* Loading */}
-        {loading && (
+        {state.loading && (
           <div className="flex items-center justify-center py-20 gap-3 text-gray-400">
             <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -337,16 +364,16 @@ export default function CadenasPage() {
         )}
 
         {/* Results */}
-        {result && !loading && (
+        {state.result && !state.loading && (
           <div>
-            {activeTab === "supply" && <SupplyResult d={result} />}
-            {activeTab === "value"  && <ValueResult d={result} />}
-            {activeTab === "foda"   && <FodaResult d={result} />}
+            {state.activeTab === "supply" && <SupplyResult d={state.result} />}
+            {state.activeTab === "value"  && <ValueResult d={state.result} />}
+            {state.activeTab === "foda"   && <FodaResult d={state.result} />}
           </div>
         )}
 
         {/* Empty state */}
-        {!result && !loading && !error && (
+        {!state.result && !state.loading && !state.error && (
           <div className="text-center py-20 text-gray-600">
             <div className="text-4xl mb-3">⛓️</div>
             <p className="text-sm">Selecciona un sector y subsector, luego elige el tipo de análisis</p>

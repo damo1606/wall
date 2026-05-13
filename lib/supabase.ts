@@ -1,17 +1,20 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js"
+import type { Database } from "@/types/database"
+
+export type TypedClient = SupabaseClient<Database>
 
 /** Cliente público — usar en componentes y rutas de lectura */
-export function supabase() {
+export function supabase(): TypedClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !key) throw new Error('[supabase] Env vars NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY no configuradas')
-  return createClient(url, key)
+  return createClient<Database>(url, key)
 }
 
 /** Cliente con service role — usar SOLO en rutas API del servidor (nunca en el cliente) */
-export function supabaseServer() {
+export function supabaseServer(): TypedClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) throw new Error('[supabase] Env vars NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY no configuradas')
-  return createClient(url, key)
+  return createClient<Database>(url, key)
 }
