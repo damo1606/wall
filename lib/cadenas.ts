@@ -13,6 +13,10 @@ const HTTP_STATUS = {
   UNPROCESSABLE_ENTITY: 422,
 } as const
 
+const ERROR_MESSAGES = {
+  UNKNOWN_ERROR: 'Error desconocido',
+} as const
+
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
 const SUPPLY_CHAIN_PROMPT = (sector: string, subsector: string) => `
@@ -224,7 +228,7 @@ export function createCadenasHandler(
       const result = await analyzer(sector.trim(), subsector.trim())
       return NextResponse.json(result)
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido'
+      const msg = e instanceof Error ? e.message : ERROR_MESSAGES.UNKNOWN_ERROR
       return NextResponse.json({ error: msg }, { status: HTTP_STATUS.UNPROCESSABLE_ENTITY })
     }
   }
