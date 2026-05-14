@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "./ThemeProvider"
+import { ACCIONES, INSTITUCIONAL, type NavPage } from "./nav-sections"
 
 type SearchResult = { symbol: string; name: string; exchange: string; type: string }
 
@@ -107,33 +108,6 @@ function NavSearch() {
     </div>
   )
 }
-
-type NavPage = { href: string; label: string }
-
-const ACCIONES: NavPage[] = [
-  { href: "/screener",     label: "Screener" },
-  { href: "/valoracion",   label: "Valoración" },
-  { href: "/ciclos",       label: "Ciclos" },
-  { href: "/sectores",     label: "Sectores" },
-  { href: "/senales",      label: "Señales" },
-  { href: "/comparar",     label: "Comparar" },
-  { href: "/prospectiva",  label: "Prospectiva" },
-  { href: "/diario",       label: "Diario" },
-  { href: "/dashboard",    label: "Dashboard" },
-  { href: "/cadenas",     label: "Cadenas" },
-]
-
-const INSTITUCIONAL: NavPage[] = [
-  { href: "/sore",          label: "SORE" },
-  { href: "/backtest",      label: "Backtest" },
-  { href: "/track-record",  label: "Track Record" },
-  { href: "/gex",           label: "GEX" },
-  { href: "/gamma-map",     label: "Gamma Map" },
-  { href: "/scanner",       label: "Scanner" },
-  { href: "/scanner-pro",   label: "Scanner Pro" },
-  { href: "/rotacion",      label: "Rotación" },
-  { href: "/data-quality",  label: "Data Quality" },
-]
 
 const ACCIONES_PREFIXES    = ACCIONES.map(p => p.href)
 const INSTITUCIONAL_PREFIXES = INSTITUCIONAL.map(p => p.href)

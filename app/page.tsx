@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { ACCIONES, INSTITUCIONAL, PORTAFOLIO, MACRO_FX } from "./nav-sections"
 
 const SECTIONS = [
   {
@@ -6,14 +7,7 @@ const SECTIONS = [
     description: "Valoración fundamental con scoring por sector y ciclo macroeconómico. Encuentra empresas de calidad a descuento.",
     href: "/screener",
     cta: "→ Screener",
-    sublinks: [
-      { href: "/screener",     label: "Screener" },
-      { href: "/valoracion",   label: "Valoración" },
-      { href: "/ciclos",       label: "Ciclos" },
-      { href: "/sectores",     label: "Sectores" },
-      { href: "/senales",      label: "Señales" },
-      { href: "/comparar",     label: "Comparar" },
-    ],
+    sublinks: ACCIONES,
     accent: "blue",
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -27,13 +21,7 @@ const SECTIONS = [
     description: "Exposición gamma (GEX), flujo de dealers y soportes/resistencias opcionales en 7 metodologías M1–M7.",
     href: "/gex",
     cta: "→ GEX",
-    sublinks: [
-      { href: "/gex",          label: "GEX" },
-      { href: "/gamma-map",    label: "Gamma Map" },
-      { href: "/scanner",      label: "Scanner" },
-      { href: "/scanner-pro",  label: "Scanner Pro" },
-      { href: "/rotacion",     label: "Rotación" },
-    ],
+    sublinks: INSTITUCIONAL,
     accent: "emerald",
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -48,12 +36,7 @@ const SECTIONS = [
     description: "Seguimiento de posiciones, balance por activo y alertas de precio en tiempo real.",
     href: "/portafolio",
     cta: "→ Portafolio",
-    sublinks: [
-      { href: "/portafolio",   label: "Posiciones" },
-      { href: "/dashboard",    label: "Dashboard" },
-      { href: "/diario",       label: "Diario" },
-      { href: "/prospectiva",  label: "Prospectiva" },
-    ],
+    sublinks: PORTAFOLIO,
     accent: "violet",
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -69,10 +52,7 @@ const SECTIONS = [
     description: "Análisis forex con COT (Commitment of Traders) y datos macroeconómicos FRED de la Reserva Federal.",
     href: "/macro-fx",
     cta: "→ Macro FX",
-    sublinks: [
-      { href: "/macro-fx",     label: "Resumen COT" },
-      { href: "/ciclos",       label: "Ciclos macro" },
-    ],
+    sublinks: MACRO_FX,
     accent: "amber",
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
