@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 
 // ── Environment Configuration ─────────────────────────────────────────────────
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-const GROQ_API_KEY = process.env.GROQ_API_KEY
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const DEFAULT_MODEL = 'google/gemini-2.5-flash'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -74,61 +75,30 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional:
 }
 `
 
-// ── LLM Providers ─────────────────────────────────────────────────────────────
+// ── LLM Provider (OpenRouter, OpenAI-compatible) ──────────────────────────────
 
-async function callGemini(prompt: string): Promise<string> {
-  if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY no configurada')
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3 },
-      }),
-      cache: 'no-store',
-    }
-  )
-  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`)
-  const json = await res.json()
-  const text = json.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!text) throw new Error('Gemini returned no text content')
-  return text
-}
-
-async function callGroq(prompt: string): Promise<string> {
-  if (!GROQ_API_KEY) throw new Error('GROQ_API_KEY no configurada')
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+async function callLLM(prompt: string, model: string = DEFAULT_MODEL): Promise<{ text: string; proveedor: string }> {
+  if (!OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY no configurada')
+  const res = await fetch(OPENROUTER_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_API_KEY}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      'HTTP-Referer': 'https://wall.app',
+      'X-Title': 'Wall - Cadenas',
+    },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
     }),
     cache: 'no-store',
   })
-  if (!res.ok) throw new Error(`Groq HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`OpenRouter HTTP ${res.status}: ${await res.text()}`)
   const json = await res.json()
   const text = json.choices?.[0]?.message?.content
-  if (!text) throw new Error('Groq returned no message content')
-  return text
-}
-
-async function callLLM(prompt: string): Promise<{ text: string; proveedor: string }> {
-  if (GEMINI_API_KEY) {
-    try {
-      return { text: await callGemini(prompt), proveedor: 'gemini' }
-    } catch (e) {
-      console.error('Gemini falló, usando Groq como fallback:', e instanceof Error ? e.message : String(e))
-      // Continue to Groq fallback
-    }
-  }
-  if (GROQ_API_KEY) {
-    return { text: await callGroq(prompt), proveedor: 'groq' }
-  }
-  throw new Error('Configura GEMINI_API_KEY o GROQ_API_KEY en las variables de entorno')
+  if (!text) throw new Error('OpenRouter returned no message content')
+  return { text, proveedor: model }
 }
 
 // ── Analysis Configuration ────────────────────────────────────────────────────
