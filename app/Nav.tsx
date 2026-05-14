@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { useTheme } from "./ThemeProvider"
-import { ACCIONES, ACCIONES_ALL, INSTITUCIONAL, type NavPage } from "./nav-sections"
+import { ACCIONES, INSTITUCIONAL, type NavPage } from "./nav-sections"
 
 type SearchResult = { symbol: string; name: string; exchange: string; type: string }
 
@@ -109,7 +109,7 @@ function NavSearch() {
   )
 }
 
-const ACCIONES_PREFIXES    = ACCIONES_ALL.map(p => p.href)
+const ACCIONES_PREFIXES    = ACCIONES.map(p => p.href)
 const INSTITUCIONAL_PREFIXES = INSTITUCIONAL.map(p => p.href)
 
 function isInSection(path: string, prefixes: string[]) {
