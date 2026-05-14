@@ -4,7 +4,18 @@
 
 export type NavPage = { href: string; label: string }
 
+// Estas 6 se muestran en el dropdown del Nav y en las home cards
 export const ACCIONES: NavPage[] = [
+  { href: "/screener",     label: "Screener" },
+  { href: "/valoracion",   label: "Valoración" },
+  { href: "/ciclos",       label: "Ciclos" },
+  { href: "/sectores",     label: "Sectores" },
+  { href: "/senales",      label: "Señales" },
+  { href: "/comparar",     label: "Comparar" },
+]
+
+// Todas las páginas de Acciones (para navegación interna)
+export const ACCIONES_ALL: NavPage[] = [
   { href: "/screener",     label: "Screener" },
   { href: "/valoracion",   label: "Valoración" },
   { href: "/ciclos",       label: "Ciclos" },
