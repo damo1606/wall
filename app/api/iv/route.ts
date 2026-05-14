@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCrumb } from "@/lib/yahoo"
-import { supabaseServer } from "@/lib/supabase"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -58,18 +57,9 @@ export async function GET(request: NextRequest) {
     const puts  = (optData.puts  ?? []).map((p: any) => ({ strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0 }))
     const atmIv = calcAtmIv(calls, puts, spot)
 
-    // Historial desde Supabase (columna atm_iv — puede no existir aún)
-    let history: number[] = []
-    try {
-      const { data } = await supabaseServer()
-        .from("sr_snapshots")
-        .select("atm_iv")
-        .eq("ticker", ticker)
-        .not("atm_iv", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(52)
-      history = (data ?? []).map((s: any) => s.atm_iv as number).filter(v => v > 0)
-    } catch { /* columna aún no existe — historial vacío */ }
+    // TODO: persistir IV histórica en gex_snapshots o tabla iv_history para calcular Rank/Percentile.
+    // sr_snapshots (legacy SORE) ya no existe en WALL.
+    const history: number[] = []
 
     return NextResponse.json({
       ticker,

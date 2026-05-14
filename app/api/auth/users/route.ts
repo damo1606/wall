@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
 
   const db = supabaseServer();
   const { data, error } = await db
-    .from("users")
+    .from("app_users")
     .insert({ username, password_hash })
     .select("id, username, created_at")
     .single();

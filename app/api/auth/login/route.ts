@@ -6,7 +6,6 @@ import bcrypt from "bcryptjs";
 import { supabaseServer } from "@/lib/supabase";
 import { signToken, SESSION_COOKIE } from "@/lib/auth";
 
-// Hash falso para la ruta de timing-attack prevention (cuando el usuario no existe)
 const DUMMY_HASH = "$2b$12$invalidhashfortimingprotectionXXXXXXXXXXXXXXXXXXXXXXX";
 
 export async function POST(request: NextRequest) {
@@ -18,12 +17,11 @@ export async function POST(request: NextRequest) {
 
   const db = supabaseServer();
   const { data: user, error } = await db
-    .from("users")
+    .from("app_users")
     .select("id, username, password_hash")
     .eq("username", username)
-    .single();
+    .maybeSingle();
 
-  // Siempre ejecutar bcrypt aunque el usuario no exista (previene enumeración por tiempo)
   const hashToCheck = user?.password_hash ?? DUMMY_HASH;
   const valid = await bcrypt.compare(password, hashToCheck);
 
@@ -39,7 +37,7 @@ export async function POST(request: NextRequest) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7 días
+    maxAge: 60 * 60 * 24 * 7,
   });
 
   return response;

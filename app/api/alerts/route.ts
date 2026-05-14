@@ -34,14 +34,30 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ error: "No autenticado" }, { status: 401 })
 
   const body = await req.json()
-  const { symbol, type, label, threshold } = body
+  const { symbol, type, label, threshold, channel } = body
 
   if (!symbol || !type)
     return NextResponse.json({ error: "symbol y type son requeridos" }, { status: 400 })
 
+  const { data: sym } = await supabaseServer()
+    .from("symbols")
+    .select("id")
+    .eq("ticker", String(symbol).toUpperCase())
+    .maybeSingle()
+
+  if (!sym) return NextResponse.json({ error: `Símbolo ${symbol} no existe` }, { status: 404 })
+
+  const thresholdPayload = { ...(threshold ?? {}), label: label ?? null }
+
   const { data, error } = await supabaseServer()
     .from("alerts")
-    .insert({ user_id: userId, symbol: symbol.toUpperCase(), type, label, threshold: threshold ?? null })
+    .insert({
+      user_id: userId,
+      symbol_id: sym.id,
+      condition: type,
+      threshold: thresholdPayload,
+      channel: channel ?? "in_app",
+    })
     .select()
     .single()
 
