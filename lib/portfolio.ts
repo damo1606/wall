@@ -247,3 +247,106 @@ export function gradeToIndex(grade: string): number {
   return GRADE_ORDER.indexOf(grade)
 }
 export { GRADE_ORDER }
+
+// ─── Import desde SORE (legacy localStorage) ──────────────────────────────────
+
+const SORE_STORAGE_KEY = "sore-portafolios-v2"
+
+type SorePortfolio = { id: string; name: string; tickers: string[]; createdAt: string }
+
+export type SoreImportResult = {
+  portfolios: number
+  uniqueTickers: number
+  watchAdded: number
+  positionsAdded: number
+  skipped: { symbol: string; reason: string }[]
+  errors: string[]
+}
+
+// Función única: lee `sore-portafolios-v2` de localStorage y mete cada ticker
+// como entrada en seguimiento (preservando el nombre del portafolio SORE en notes)
+// y como posición placeholder (qty=0, buyPrice=0). Dedupea contra lo existente.
+export async function importSorePortafolios(): Promise<SoreImportResult> {
+  const result: SoreImportResult = {
+    portfolios: 0, uniqueTickers: 0, watchAdded: 0, positionsAdded: 0, skipped: [], errors: [],
+  }
+
+  if (typeof window === "undefined") {
+    result.errors.push("solo disponible en el navegador")
+    return result
+  }
+
+  let raw: string | null = null
+  try {
+    raw = window.localStorage.getItem(SORE_STORAGE_KEY)
+  } catch (e) {
+    result.errors.push(`no se pudo leer localStorage: ${(e as Error).message}`)
+    return result
+  }
+
+  if (!raw) {
+    result.errors.push(`no hay datos SORE en localStorage (${SORE_STORAGE_KEY})`)
+    return result
+  }
+
+  let sore: SorePortfolio[] = []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) throw new Error("formato inválido (esperaba array)")
+    sore = parsed
+  } catch (e) {
+    result.errors.push(`JSON inválido: ${(e as Error).message}`)
+    return result
+  }
+
+  result.portfolios = sore.length
+
+  const firstSeenIn = new Map<string, string>()
+  for (const p of sore) {
+    if (!p?.tickers) continue
+    for (const t of p.tickers) {
+      const sym = String(t).trim().toUpperCase()
+      if (!sym) continue
+      if (!firstSeenIn.has(sym)) firstSeenIn.set(sym, p.name || "SORE")
+    }
+  }
+  result.uniqueTickers = firstSeenIn.size
+
+  const [existingWatch, existingPositions] = await Promise.all([getWatchEntries(), getPortfolio()])
+  const watchSet = new Set(existingWatch.map(e => e.symbol.toUpperCase()))
+  const positionSet = new Set(existingPositions.map(e => e.symbol.toUpperCase()))
+  let watchCount = existingWatch.length
+
+  for (const [sym, listName] of firstSeenIn) {
+    const noteTag = `SORE/${listName}`
+
+    if (watchSet.has(sym)) {
+      result.skipped.push({ symbol: sym, reason: "ya en seguimiento" })
+    } else if (watchCount >= WATCH_LIMIT) {
+      result.skipped.push({ symbol: sym, reason: `límite seguimiento (${WATCH_LIMIT})` })
+    } else {
+      try {
+        await addWatch({ symbol: sym, company: "", notes: noteTag })
+        result.watchAdded++
+        watchCount++
+        watchSet.add(sym)
+      } catch (e) {
+        result.errors.push(`watch ${sym}: ${(e as Error).message}`)
+      }
+    }
+
+    if (positionSet.has(sym)) {
+      result.skipped.push({ symbol: sym, reason: "ya en posiciones" })
+    } else {
+      try {
+        await addPosition({ symbol: sym, company: "", qty: 0, buyPrice: 0, buyDate: "", notes: noteTag })
+        result.positionsAdded++
+        positionSet.add(sym)
+      } catch (e) {
+        result.errors.push(`pos ${sym}: ${(e as Error).message}`)
+      }
+    }
+  }
+
+  return result
+}

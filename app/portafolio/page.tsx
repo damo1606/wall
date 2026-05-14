@@ -10,6 +10,7 @@ import {
   getWatchEntries, addWatch, removeWatch,
   getAlerts, addAlert, removeAlert, toggleAlertActive, markTriggered, resetAlert, checkAlerts,
   alertTypeLabel, alertThresholdSuffix, GRADE_ORDER, WATCH_LIMIT,
+  importSorePortafolios,
 } from "@/lib/portfolio"
 import type { PortfolioEntry, WatchEntry, Alert, AlertType } from "@/lib/portfolio"
 import { ErrorBoundary } from "@/app/ErrorBoundary"
@@ -386,11 +387,30 @@ export default function PortafolioPage() {
             <h1 className="text-3xl font-bold text-white">Portafolio</h1>
             <p className="text-gray-400 mt-1 text-sm">Posiciones · Seguimiento · Alertas</p>
           </div>
-          <button onClick={() => refreshData(allSymbols)}
-            disabled={loadingSymbols.size > 0}
-            className="text-xs px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40">
-            {loadingSymbols.size > 0 ? "Actualizando..." : "↻ Actualizar"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                if (!confirm("Importar tickers de SORE (localStorage) a Seguimiento + Posiciones (qty=0)?")) return
+                const r = await importSorePortafolios()
+                const lines = [
+                  `${r.portfolios} portafolios SORE · ${r.uniqueTickers} tickers únicos`,
+                  `Seguimiento: +${r.watchAdded}`,
+                  `Posiciones: +${r.positionsAdded}`,
+                ]
+                if (r.skipped.length) lines.push(`Omitidos: ${r.skipped.length}`)
+                if (r.errors.length) lines.push(`Errores:\n${r.errors.join("\n")}`)
+                alert(lines.join("\n"))
+                await reload()
+              }}
+              className="text-xs px-3 py-1.5 rounded bg-blue-700/30 border border-blue-600/60 text-blue-200 hover:text-white transition-colors">
+              ⤓ Importar SORE
+            </button>
+            <button onClick={() => refreshData(allSymbols)}
+              disabled={loadingSymbols.size > 0}
+              className="text-xs px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:text-white transition-colors disabled:opacity-40">
+              {loadingSymbols.size > 0 ? "Actualizando..." : "↻ Actualizar"}
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
