@@ -1,5 +1,6 @@
 import { unstable_cache } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
+import { fetchStockData, type StockData } from '@/lib/yahoo'
 
 // ── Environment Configuration ─────────────────────────────────────────────────
 
@@ -19,61 +20,93 @@ const ERROR_MESSAGES = {
 } as const
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
+// `finanzas` es un bloque de métricas reales (Yahoo Finance) o "" si no hay tickers.
 
-const SUPPLY_CHAIN_PROMPT = (sector: string, subsector: string) => `
-Eres un experto en cadenas de suministros globales.
-Analiza la cadena de suministros del subsector "${subsector}" dentro del sector "${sector}".
+type PromptFn = (sector: string, subsector: string, finanzas: string) => string
 
-Responde ÚNICAMENTE con JSON válido, sin texto adicional:
-{
-  "subsector": "${subsector}",
-  "actores_clave": [
-    {"nombre": "Actor", "rol": "Rol en la cadena", "ejemplos": ["Empresa A", "Empresa B"]}
-  ],
-  "flujo_materiales": [
-    {"etapa": "Nombre etapa", "descripcion": "Qué ocurre", "actores": ["Actor 1"]}
-  ],
-  "puntos_riesgo": [
-    {"riesgo": "Descripción", "impacto": "alto", "mitigacion": "Cómo mitigarlo"}
-  ],
-  "indicadores_clave": ["KPI 1", "KPI 2"],
-  "tendencias": ["Tendencia 1", "Tendencia 2"]
-}
+const SUPPLY_CHAIN_PROMPT: PromptFn = (sector, subsector, finanzas) => `
+Experto en cadenas de suministro globales. Analiza el subsector "${subsector}" del sector "${sector}".
+${finanzas}
+Si hay datos financieros, úsalos para justificar riesgos y puntos críticos. Responde SOLO JSON válido, sin texto adicional:
+{"subsector":"${subsector}","actores_clave":[{"nombre":"","rol":"","ejemplos":[]}],"flujo_materiales":[{"etapa":"","descripcion":"","actores":[]}],"puntos_riesgo":[{"riesgo":"","impacto":"alto|medio|bajo","mitigacion":""}],"indicadores_clave":[],"tendencias":[]}
 `
 
-const VALUE_CHAIN_PROMPT = (sector: string, subsector: string) => `
-Eres un experto en cadenas de valor y ventajas competitivas (framework Porter).
-Analiza la cadena de valores del subsector "${subsector}" dentro del sector "${sector}".
-
-Responde ÚNICAMENTE con JSON válido, sin texto adicional:
-{
-  "subsector": "${subsector}",
-  "actividades_primarias": [
-    {"actividad": "Nombre", "descripcion": "Descripción", "margen_tipico": "X-Y%"}
-  ],
-  "actividades_soporte": [
-    {"actividad": "Nombre", "descripcion": "Descripción"}
-  ],
-  "ventajas_competitivas": ["Ventaja 1", "Ventaja 2"],
-  "drivers_valor": ["Driver 1", "Driver 2"],
-  "margen_industria": {"minimo": "X%", "maximo": "Y%", "promedio": "Z%"}
-}
+const VALUE_CHAIN_PROMPT: PromptFn = (sector, subsector, finanzas) => `
+Experto en cadena de valor y framework Porter. Analiza el subsector "${subsector}" del sector "${sector}".
+${finanzas}
+Si hay datos financieros, compara los márgenes reportados con los típicos de la industria. Responde SOLO JSON válido, sin texto adicional:
+{"subsector":"${subsector}","actividades_primarias":[{"actividad":"","descripcion":"","margen_tipico":"X-Y%"}],"actividades_soporte":[{"actividad":"","descripcion":""}],"ventajas_competitivas":[],"drivers_valor":[],"margen_industria":{"minimo":"X%","maximo":"Y%","promedio":"Z%"}}
 `
 
-const FODA_PROMPT = (sector: string, subsector: string) => `
-Eres un consultor estratégico especialista en análisis sectorial.
-Realiza un FODA detallado del subsector "${subsector}" dentro del sector "${sector}".
-
-Responde ÚNICAMENTE con JSON válido, sin texto adicional:
-{
-  "subsector": "${subsector}",
-  "fortalezas": [{"punto": "Descripción", "impacto": "alto"}],
-  "oportunidades": [{"punto": "Descripción", "horizonte": "corto"}],
-  "debilidades": [{"punto": "Descripción", "urgencia": "alta"}],
-  "amenazas": [{"punto": "Descripción", "probabilidad": "alta"}],
-  "estrategia_recomendada": "Párrafo con la estrategia recomendada"
-}
+const FODA_PROMPT: PromptFn = (sector, subsector, finanzas) => `
+Consultor estratégico sectorial. Realiza un FODA del subsector "${subsector}" del sector "${sector}".
+${finanzas}
+Si hay datos financieros, cada punto debe citar una métrica (ROIC, márgenes, deuda, crecimiento, valoración). Responde SOLO JSON válido, sin texto adicional:
+{"subsector":"${subsector}","fortalezas":[{"punto":"","impacto":"alto|medio|bajo"}],"oportunidades":[{"punto":"","horizonte":"corto|medio|largo"}],"debilidades":[{"punto":"","urgencia":"alta|media|baja"}],"amenazas":[{"punto":"","probabilidad":"alta|media|baja"}],"estrategia_recomendada":""}
 `
+
+// ── Bloque de datos financieros (Yahoo Finance) ───────────────────────────────
+
+const TICKER_RE = /^[A-Z][A-Z.\-]{0,9}$/
+const MAX_TICKERS = 8
+
+// Normaliza la entrada de tickers: acepta array o string separado por comas
+function normalizeTickers(input: unknown): string[] {
+  const raw = Array.isArray(input) ? input : typeof input === 'string' ? input.split(',') : []
+  const seen = new Set<string>()
+  for (const t of raw) {
+    if (typeof t !== 'string') continue
+    const sym = t.trim().toUpperCase()
+    if (sym && TICKER_RE.test(sym)) seen.add(sym)
+  }
+  return [...seen].slice(0, MAX_TICKERS)
+}
+
+const pct = (v: number) => `${(v * 100).toFixed(1)}%`
+
+// Promedio ignorando ceros y valores no finitos (datos faltantes de Yahoo)
+function avg(nums: number[]): number {
+  const valid = nums.filter(n => Number.isFinite(n) && n !== 0)
+  return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : 0
+}
+
+type FinanceMetrics = Pick<
+  StockData,
+  'pe' | 'roic' | 'operatingMargin' | 'netMargin' | 'debtToEquity' | 'revenueGrowth' | 'fcfMargin' | 'upsideToTarget'
+>
+
+function formatMetrics(m: FinanceMetrics): string {
+  return [
+    `PE ${m.pe ? m.pe.toFixed(1) : 'n/d'}`,
+    `ROIC ${pct(m.roic)}`,
+    `margen op. ${pct(m.operatingMargin)}`,
+    `margen neto ${pct(m.netMargin)}`,
+    `deuda/equity ${(m.debtToEquity / 100).toFixed(2)}`,
+    `crec. ingresos ${pct(m.revenueGrowth)}`,
+    `FCF margin ${pct(m.fcfMargin)}`,
+    `upside analistas ${m.upsideToTarget >= 0 ? '+' : ''}${m.upsideToTarget.toFixed(0)}%`,
+  ].join(' · ')
+}
+
+// Construye el bloque DATOS REALES inyectado en el prompt — "" si no hay datos
+function buildFinanceBlock(stocks: StockData[]): string {
+  if (stocks.length === 0) return ''
+  if (stocks.length === 1) {
+    const s = stocks[0]
+    return `\nDATOS REALES (Yahoo Finance — ${s.symbol}, ${s.company}):\n${formatMetrics(s)}\n`
+  }
+  const agg: FinanceMetrics = {
+    pe: avg(stocks.map(s => s.pe)),
+    roic: avg(stocks.map(s => s.roic)),
+    operatingMargin: avg(stocks.map(s => s.operatingMargin)),
+    netMargin: avg(stocks.map(s => s.netMargin)),
+    debtToEquity: avg(stocks.map(s => s.debtToEquity)),
+    revenueGrowth: avg(stocks.map(s => s.revenueGrowth)),
+    fcfMargin: avg(stocks.map(s => s.fcfMargin)),
+    upsideToTarget: avg(stocks.map(s => s.upsideToTarget)),
+  }
+  return `\nDATOS REALES (Yahoo Finance — promedio de ${stocks.map(s => s.symbol).join(', ')}):\n${formatMetrics(agg)}\n`
+}
 
 // ── LLM Provider (OpenRouter, OpenAI-compatible) ──────────────────────────────
 
@@ -161,15 +194,30 @@ export type AnalysisResult = {
   data: Record<string, unknown>
   proveedor: string
   confidence: number
+  tickers_usados: string[]   // tickers cuyos datos financieros se inyectaron al prompt
 }
 
-async function _analyze(type: AnalysisType, sector: string, subsector: string): Promise<AnalysisResult> {
+async function _analyze(
+  type: AnalysisType,
+  sector: string,
+  subsector: string,
+  tickers: string[]
+): Promise<AnalysisResult> {
   const config = ANALYSIS_CONFIG[type]
-  const prompt = config.prompt(sector, subsector)
+
+  // Datos financieros: solo si el usuario ingresó tickers (respeta Yahoo como fuente única)
+  const stocks = tickers.length
+    ? (await Promise.all(tickers.map(t => fetchStockData(t)))).filter(
+        (s): s is StockData => s !== null
+      )
+    : []
+  const finanzas = buildFinanceBlock(stocks)
+
+  const prompt = config.prompt(sector, subsector, finanzas)
   const { text, proveedor } = await callLLM(prompt)
   const { data, score } = validate(text, type)
   if (score < 0.5) throw new Error('Respuesta incompleta del LLM. Intenta de nuevo.')
-  return { data, proveedor, confidence: score }
+  return { data, proveedor, confidence: score, tickers_usados: stocks.map(s => s.symbol) }
 }
 
 // ── Validation for API routes ────────────────────────────────────────────────
@@ -186,16 +234,18 @@ function validateInput(sector: string, subsector: string): string | null {
 // ── Request handler factory ───────────────────────────────────────────────────
 
 export function createCadenasHandler(
-  analyzer: (sector: string, subsector: string) => Promise<AnalysisResult>
+  analyzer: (sector: string, subsector: string, tickers: string[]) => Promise<AnalysisResult>
 ) {
   return async (req: NextRequest) => {
     try {
-      const { sector, subsector } = await req.json()
+      const body = await req.json()
+      const { sector, subsector } = body
       const error = validateInput(sector, subsector)
       if (error) {
         return NextResponse.json({ error }, { status: HTTP_STATUS.BAD_REQUEST })
       }
-      const result = await analyzer(sector.trim(), subsector.trim())
+      const tickers = normalizeTickers(body.tickers)
+      const result = await analyzer(sector.trim(), subsector.trim(), tickers)
       return NextResponse.json(result)
     } catch (e) {
       const msg = e instanceof Error ? e.message : ERROR_MESSAGES.UNKNOWN_ERROR
@@ -207,20 +257,24 @@ export function createCadenasHandler(
 // ── Cached exports (24h TTL) ──────────────────────────────────────────────────
 
 // Generate cached analyzers from config to reduce copy-paste and maintain DRY principle
+// El array `tickers` forma parte de la clave de caché — distintas empresas → distinto resultado
 export const analyzeSupplyChain = unstable_cache(
-  (sector: string, subsector: string) => _analyze('supply_chain', sector, subsector),
+  (sector: string, subsector: string, tickers: string[]) =>
+    _analyze('supply_chain', sector, subsector, tickers),
   ['cadenas-supply'],
   { revalidate: 86400, tags: ['cadenas'] }
 )
 
 export const analyzeValueChain = unstable_cache(
-  (sector: string, subsector: string) => _analyze('value_chain', sector, subsector),
+  (sector: string, subsector: string, tickers: string[]) =>
+    _analyze('value_chain', sector, subsector, tickers),
   ['cadenas-value'],
   { revalidate: 86400, tags: ['cadenas'] }
 )
 
 export const analyzeFoda = unstable_cache(
-  (sector: string, subsector: string) => _analyze('foda', sector, subsector),
+  (sector: string, subsector: string, tickers: string[]) =>
+    _analyze('foda', sector, subsector, tickers),
   ['cadenas-foda'],
   { revalidate: 86400, tags: ['cadenas'] }
 )

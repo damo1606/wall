@@ -229,10 +229,12 @@ const API_URLS: Record<Tab, string> = Object.fromEntries(
 interface AnalysisState {
   sector: string
   subsector: string
+  tickers: string
   activeTab: Tab | null
   loading: boolean
   result: Record<string, unknown> | null
   proveedor: string
+  tickersUsados: string[]
   error: string
 }
 
@@ -240,10 +242,12 @@ export default function CadenasPage() {
   const [state, setState] = useState<AnalysisState>({
     sector: "",
     subsector: "",
+    tickers: "",
     activeTab: null,
     loading: false,
     result: null,
     proveedor: "",
+    tickersUsados: [],
     error: "",
   })
 
@@ -253,7 +257,7 @@ export default function CadenasPage() {
       return
     }
 
-    setState(prev => ({ ...prev, activeTab: tab, loading: true, error: "", result: null }))
+    setState(prev => ({ ...prev, activeTab: tab, loading: true, error: "", result: null, tickersUsados: [] }))
 
     try {
       const res = await fetch(API_URLS[tab], {
@@ -261,12 +265,13 @@ export default function CadenasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sector: state.sector.trim(),
-          subsector: state.subsector.trim()
+          subsector: state.subsector.trim(),
+          tickers: state.tickers.trim(),
         }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? "Error desconocido")
-      setState(prev => ({ ...prev, result: json.data, proveedor: json.proveedor }))
+      setState(prev => ({ ...prev, result: json.data, proveedor: json.proveedor, tickersUsados: json.tickers_usados ?? [] }))
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Error desconocido"
       setState(prev => ({ ...prev, error: msg }))
@@ -309,6 +314,22 @@ export default function CadenasPage() {
             </div>
           </div>
 
+          {/* Tickers — opcional: inyecta datos financieros reales (Yahoo Finance) */}
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 font-medium mb-1.5 block">
+              TICKERS <span className="text-gray-600">(opcional · separados por coma · máx. 8)</span>
+            </label>
+            <input
+              value={state.tickers}
+              onChange={e => setState(prev => ({ ...prev, tickers: e.target.value }))}
+              placeholder="ej. NVDA, AMD, AVGO"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500 transition"
+            />
+            <p className="text-[11px] text-gray-600 mt-1">
+              1 ticker → análisis de la empresa · varios → promedio del subsector · vacío → análisis sectorial
+            </p>
+          </div>
+
           {/* Sector chips */}
           <div className="flex flex-wrap gap-1.5">
             {SECTORS.map(s => (
@@ -340,9 +361,15 @@ export default function CadenasPage() {
             </button>
           ))}
 
+          {state.tickersUsados.length > 0 && !state.loading && (
+            <span className="ml-auto self-center text-xs font-medium px-3 py-1 rounded-full bg-green-700 text-white">
+              📊 Datos: {state.tickersUsados.join(", ")}
+            </span>
+          )}
+
           {state.proveedor && !state.loading && (
-            <span className={`ml-auto self-center text-xs font-medium px-3 py-1 rounded-full text-white ${state.proveedor === "gemini" ? "bg-blue-600" : "bg-orange-600"}`}>
-              {state.proveedor === "gemini" ? "Google Gemini" : "Groq LLaMA"}
+            <span className={`${state.tickersUsados.length > 0 ? "" : "ml-auto"} self-center text-xs font-medium px-3 py-1 rounded-full bg-blue-600 text-white`}>
+              {state.proveedor}
             </span>
           )}
         </div>

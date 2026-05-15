@@ -43,3 +43,5 @@ next-env.d.ts
 
 # claude code — local config with secrets
 .claude/settings.local.json
+
+.vercel
