@@ -24,25 +24,40 @@ const ERROR_MESSAGES = {
 
 type PromptFn = (sector: string, subsector: string, finanzas: string) => string
 
+// Objetivo del usuario: comprar barato, vender caro. Cada análisis debe terminar con
+// tickers bursátiles reales clasificados por valoración (compra / venta / mantener).
+const OPORTUNIDADES_INSTR =
+  'OBLIGATORIO: en "oportunidades_inversion" lista de 4 a 8 empresas cotizadas reales del subsector ' +
+  'con su ticker bursátil exacto (símbolo de la bolsa). Clasifica cada "senal" como ' +
+  '"barato" (infravalorada, candidata a COMPRA), "caro" (sobrevalorada, candidata a VENTA) o "justo". ' +
+  'Si hay datos financieros, fundamenta la señal en ellos (PE, ROIC, márgenes, crecimiento). ' +
+  '"tesis" es una sola línea explicando por qué comprar o vender.'
+
+const OPORTUNIDADES_SCHEMA =
+  '"oportunidades_inversion":[{"ticker":"","empresa":"","senal":"barato|caro|justo","tesis":""}]'
+
 const SUPPLY_CHAIN_PROMPT: PromptFn = (sector, subsector, finanzas) => `
 Experto en cadenas de suministro globales. Analiza el subsector "${subsector}" del sector "${sector}".
 ${finanzas}
-Si hay datos financieros, úsalos para justificar riesgos y puntos críticos. Responde SOLO JSON válido, sin texto adicional:
-{"subsector":"${subsector}","actores_clave":[{"nombre":"","rol":"","ejemplos":[]}],"flujo_materiales":[{"etapa":"","descripcion":"","actores":[]}],"puntos_riesgo":[{"riesgo":"","impacto":"alto|medio|bajo","mitigacion":""}],"indicadores_clave":[],"tendencias":[]}
+Si hay datos financieros, úsalos para justificar riesgos y puntos críticos. ${OPORTUNIDADES_INSTR}
+Responde SOLO JSON válido, sin texto adicional:
+{"subsector":"${subsector}","actores_clave":[{"nombre":"","rol":"","ejemplos":[]}],"flujo_materiales":[{"etapa":"","descripcion":"","actores":[]}],"puntos_riesgo":[{"riesgo":"","impacto":"alto|medio|bajo","mitigacion":""}],"indicadores_clave":[],"tendencias":[],${OPORTUNIDADES_SCHEMA}}
 `
 
 const VALUE_CHAIN_PROMPT: PromptFn = (sector, subsector, finanzas) => `
 Experto en cadena de valor y framework Porter. Analiza el subsector "${subsector}" del sector "${sector}".
 ${finanzas}
-Si hay datos financieros, compara los márgenes reportados con los típicos de la industria. Responde SOLO JSON válido, sin texto adicional:
-{"subsector":"${subsector}","actividades_primarias":[{"actividad":"","descripcion":"","margen_tipico":"X-Y%"}],"actividades_soporte":[{"actividad":"","descripcion":""}],"ventajas_competitivas":[],"drivers_valor":[],"margen_industria":{"minimo":"X%","maximo":"Y%","promedio":"Z%"}}
+Si hay datos financieros, compara los márgenes reportados con los típicos de la industria. ${OPORTUNIDADES_INSTR}
+Responde SOLO JSON válido, sin texto adicional:
+{"subsector":"${subsector}","actividades_primarias":[{"actividad":"","descripcion":"","margen_tipico":"X-Y%"}],"actividades_soporte":[{"actividad":"","descripcion":""}],"ventajas_competitivas":[],"drivers_valor":[],"margen_industria":{"minimo":"X%","maximo":"Y%","promedio":"Z%"},${OPORTUNIDADES_SCHEMA}}
 `
 
 const FODA_PROMPT: PromptFn = (sector, subsector, finanzas) => `
 Consultor estratégico sectorial. Realiza un FODA del subsector "${subsector}" del sector "${sector}".
 ${finanzas}
-Si hay datos financieros, cada punto debe citar una métrica (ROIC, márgenes, deuda, crecimiento, valoración). Responde SOLO JSON válido, sin texto adicional:
-{"subsector":"${subsector}","fortalezas":[{"punto":"","impacto":"alto|medio|bajo"}],"oportunidades":[{"punto":"","horizonte":"corto|medio|largo"}],"debilidades":[{"punto":"","urgencia":"alta|media|baja"}],"amenazas":[{"punto":"","probabilidad":"alta|media|baja"}],"estrategia_recomendada":""}
+Si hay datos financieros, cada punto debe citar una métrica (ROIC, márgenes, deuda, crecimiento, valoración). ${OPORTUNIDADES_INSTR}
+Responde SOLO JSON válido, sin texto adicional:
+{"subsector":"${subsector}","fortalezas":[{"punto":"","impacto":"alto|medio|bajo"}],"oportunidades":[{"punto":"","horizonte":"corto|medio|largo"}],"debilidades":[{"punto":"","urgencia":"alta|media|baja"}],"amenazas":[{"punto":"","probabilidad":"alta|media|baja"}],"estrategia_recomendada":"",${OPORTUNIDADES_SCHEMA}}
 `
 
 // ── Bloque de datos financieros (Yahoo Finance) ───────────────────────────────

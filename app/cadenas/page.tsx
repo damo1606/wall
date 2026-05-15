@@ -221,6 +221,43 @@ function FodaResult({ d }: { d: Record<string, unknown> }) {
   )
 }
 
+// Señal de valoración → estilo y etiqueta de acción (comprar barato / vender caro)
+const SENAL_CONFIG: Record<string, { cls: string; label: string }> = {
+  barato: { cls: "bg-green-900/40 text-green-300 border-green-800/40", label: "COMPRA" },
+  caro:   { cls: "bg-red-900/40 text-red-300 border-red-800/40",       label: "VENTA" },
+  justo:  { cls: "bg-gray-800 text-gray-400 border-gray-700",          label: "MANTENER" },
+}
+
+// Bloque común a los 3 análisis: tickers clasificados por oportunidad de inversión
+function OportunidadesResult({ d }: { d: Record<string, unknown> }) {
+  const ops = d.oportunidades_inversion as
+    { ticker: string; empresa: string; senal: string; tesis: string }[] ?? []
+  if (ops.length === 0) return null
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 mt-4">
+      <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+        💰 Oportunidades de inversión
+      </h4>
+      <div className="space-y-2">
+        {ops.map((o, i) => {
+          const s = SENAL_CONFIG[o.senal?.toLowerCase()] ?? SENAL_CONFIG.justo
+          return (
+            <div key={i} className={`rounded-lg p-3 border ${s.cls}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-bold text-sm text-white">{o.ticker}</span>
+                <span className="text-xs text-gray-400 flex-1">{o.empresa}</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-black/30">{s.label}</span>
+              </div>
+              <div className="text-xs">{o.tesis}</div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // API URL lookup from TABS configuration
 const API_URLS: Record<Tab, string> = Object.fromEntries(
   TABS.map(t => [t.id, t.apiPath])
@@ -396,6 +433,7 @@ export default function CadenasPage() {
             {state.activeTab === "supply" && <SupplyResult d={state.result} />}
             {state.activeTab === "value"  && <ValueResult d={state.result} />}
             {state.activeTab === "foda"   && <FodaResult d={state.result} />}
+            <OportunidadesResult d={state.result} />
           </div>
         )}
 
