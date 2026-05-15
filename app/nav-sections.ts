@@ -5,6 +5,7 @@
 export type NavPage = { href: string; label: string }
 
 export const ACCIONES: NavPage[] = [
+  { href: "/oportunidades", label: "Oportunidades" },
   { href: "/screener",     label: "Screener" },
   { href: "/valoracion",   label: "Valoración" },
   { href: "/ciclos",       label: "Ciclos" },

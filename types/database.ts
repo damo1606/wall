@@ -49,6 +49,64 @@ export type Database = {
           },
         ]
       }
+      alert_events: {
+        Row: {
+          alert_id: string | null
+          created_at: string
+          id: string
+          kind: string
+          message: string
+          opportunity_score: number | null
+          read_at: string | null
+          symbol_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          alert_id?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          message: string
+          opportunity_score?: number | null
+          read_at?: string | null
+          symbol_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          alert_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          message?: string
+          opportunity_score?: number | null
+          read_at?: string | null
+          symbol_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alert_events_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: false
+            referencedRelation: "alerts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alert_events_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alert_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       alerts: {
         Row: {
           channel: string
