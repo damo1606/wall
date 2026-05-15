@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCrumb } from "@/lib/yahoo"
+import { readSnapshotHistory, recordDailySnapshot, SNAPSHOT_IV } from "@/lib/snapshots"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -57,9 +58,13 @@ export async function GET(request: NextRequest) {
     const puts  = (optData.puts  ?? []).map((p: any) => ({ strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0 }))
     const atmIv = calcAtmIv(calls, puts, spot)
 
-    // TODO: persistir IV histórica en gex_snapshots o tabla iv_history para calcular Rank/Percentile.
-    // sr_snapshots (legacy SORE) ya no existe en WALL.
-    const history: number[] = []
+    // Historial de IV ATM en methodology_snapshots (una fila por ticker/día UTC).
+    const prior = await readSnapshotHistory(SNAPSHOT_IV, ticker)
+    const history: number[] = prior
+      .map(p => p.atmIv)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    // Persistir la lectura de hoy — idempotente por día, best-effort.
+    await recordDailySnapshot(SNAPSHOT_IV, ticker, { atmIv, spot })
 
     return NextResponse.json({
       ticker,

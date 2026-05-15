@@ -6,6 +6,7 @@ import { computeAnalysis5, compute25dSkew, type ExpData5 } from "@/lib/gex5";
 import { computeSpyMetrics, computeRegime }                from "@/lib/gex6";
 import { computeAnalysis7 }                                from "@/lib/gex7";
 import { computeFlowScore, computeLiquidityScore }        from "@/lib/flows";
+import { readSnapshotHistory, recordDailySnapshot, SNAPSHOT_SR } from "@/lib/snapshots";
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -81,9 +82,8 @@ export async function GET(request: NextRequest) {
   if (!ticker) return NextResponse.json({ error: "ticker is required" }, { status: 400 });
 
   try {
-    // TODO: persistir snapshots S/R en methodology_snapshots o tabla dedicada de WALL.
-    // sr_snapshots (legacy SORE) ya no existe — historial vacío por ahora.
-    const snapshotsPromise: Promise<Record<string, number | null>[]> = Promise.resolve([]);
+    // Historial de niveles S/R en methodology_snapshots (una fila por ticker/día UTC).
+    const snapshotsPromise = readSnapshotHistory(SNAPSHOT_SR, ticker);
 
     const { crumb, cookie } = await getCredentials();
 
@@ -225,8 +225,19 @@ export async function GET(request: NextRequest) {
       return { ...cluster, historicalDays };
     });
 
-    // TODO: persistir resultado en methodology_snapshots o tabla S/R dedicada.
-    // (sr_snapshots legacy ya no existe — antes era fire-and-forget aquí).
+    // Persistir los niveles S/R de hoy — alimenta el historicalDays de futuras
+    // lecturas. Idempotente por día UTC, best-effort.
+    await recordDailySnapshot(SNAPSHOT_SR, ticker, {
+      spot,
+      m1_support:           m1.levels.support,
+      m1_resistance:        m1.levels.resistance,
+      m2_support:           m2Result.support,
+      m2_resistance:        m2Result.resistance,
+      m3_support:           m3Result.support,
+      m3_resistance:        m3Result.resistance,
+      m5_support_strike:    m5.support?.strike ?? null,
+      m5_resistance_strike: m5.resistance?.strike ?? null,
+    });
 
     return NextResponse.json({
       ...result,

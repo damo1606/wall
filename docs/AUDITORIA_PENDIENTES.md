@@ -43,23 +43,42 @@ Pendiente real:
 - La Fase 2 depende de `methodology_snapshots` con **≥2 observaciones por símbolo**. `getHistoricalPercentiles` omite los que tienen menos historial. Si el cron de snapshot lleva poco tiempo corriendo, la mayoría de tickers tendrán `historicalPercentile: null` → `histPct = 50` (neutral) y la señal histórica no aporta.
 - **Acción:** verificar cuántos días de snapshots hay acumulados; la Fase 2 no es efectiva hasta tener historial.
 
-## 4. TODOs abiertos en código — 🟡 MEDIA
+## 4. TODOs abiertos en código — ✅ RESUELTO (2026-05-15)
 
-- `app/api/analysis7/route.ts:84` y `:228` — persistir snapshots S/R en `methodology_snapshots` o tabla S/R dedicada.
-- `app/api/iv/route.ts:60` — persistir IV histórica para calcular IV Rank/Percentile. **Sin esto, IV Rank no es calculable.**
+Los 3 TODOs de persistencia se cerraron reutilizando la tabla genérica
+`methodology_snapshots` (sin migración nueva), vía el nuevo módulo `lib/snapshots.ts`:
 
-## 5. Limpieza — 🟢 BAJA
+- `readSnapshotHistory(methodology, symbol)` — historial cronológico por ticker.
+- `recordDailySnapshot(methodology, symbol, payload)` — inserta una fila por ticker
+  y día UTC, idempotente y best-effort (nunca rompe la respuesta de la API).
 
-- `.env.local.sore.bak` — backup de la era SORE; SORE ya fusionado en Descuentos. Candidato a borrar.
+Cableado:
+
+- `app/api/iv/route.ts` — lee el historial de IV ATM y persiste la lectura del día.
+  IV Rank/Percentile se calculan en cuanto se acumulan ≥5 días.
+- `app/api/analysis7/route.ts` — lee el historial de niveles S/R (M1/M2/M3/M5) y
+  persiste los del día; alimenta el `historicalDays` de cada cluster S/R.
+
+**Nota:** el historial se construye "al leer" — arranca vacío y se llena conforme se
+usan los endpoints. IV Rank y `historicalDays` quedan inertes hasta acumular días.
+
+## 5. Limpieza — ✅ RESUELTO (2026-05-15)
+
+- `.env.local.sore.bak` — eliminado (estaba en `.gitignore`, sin seguimiento).
+- `supabase/.temp/` — añadido a `.gitignore`.
 
 ---
 
 ## Resumen de prioridades
 
-| # | Tema | Prioridad | Bloquea |
-|---|------|-----------|---------|
-| 1 | Aplicar migraciones (incl. `alert_events`) | 🔴 Alta | Alertas de oportunidades |
-| 2 | JSON mode + regex de fallback en Cadenas | 🟡 Media | Robustez de análisis Gemini |
-| 3 | Acumular historial para Fase 2 del Motor | 🟡 Media | Señal "barato vs su historia" |
-| 4 | Persistir S/R e IV histórica | 🟡 Media | IV Rank, snapshots S/R |
-| 5 | Borrar `.env.local.sore.bak` | 🟢 Baja | — |
+| # | Tema | Estado |
+|---|------|--------|
+| 1 | Aplicar migraciones (incl. `alert_events`) | ✅ Resuelto |
+| 2 | JSON mode + extractor de llaves en Cadenas | ✅ Resuelto |
+| 3 | Acumular historial para Fase 2 del Motor | ⏳ Operativo — depende del cron |
+| 4 | Persistir S/R e IV histórica | ✅ Resuelto |
+| 5 | Borrar `.env.local.sore.bak` + `.gitignore` | ✅ Resuelto |
+
+**#3** es el único pendiente y no es código: el Motor de Oportunidades y los nuevos
+historiales (#4) se llenan solos conforme el cron y los endpoints se ejecutan. No hay
+nada que implementar — solo dejar pasar los días.
