@@ -19,6 +19,22 @@ type SourceStatus = {
   latencyMs: number | null
 }
 
+type CronStatus = {
+  last: {
+    job_name: string
+    status: string
+    started_at: string
+    finished_at: string | null
+    rows_inserted: number | null
+    rows_failed: number | null
+    error_summary: string | null
+  } | null
+  lastSuccessAt: string | null
+  hoursSinceSuccess: number | null
+  stale: boolean
+  neverRan: boolean
+}
+
 const GROUPS: Record<string, string> = {
   gdpGrowth: "Headline", inflation: "Headline", unemployment: "Headline", fedRate: "Headline", yieldCurve: "Headline",
   nfp: "Mercado Laboral", joblessClaims: "Mercado Laboral", u6Rate: "Mercado Laboral", jolts: "Mercado Laboral",
@@ -48,6 +64,7 @@ function daysBetween(date: string): number {
 export default function DataQualityPage() {
   const [indicators, setIndicators] = useState<IndicatorStatus[]>([])
   const [sources, setSources] = useState<SourceStatus[]>([])
+  const [cron, setCron] = useState<CronStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [lastCheck, setLastCheck] = useState("")
 
@@ -86,8 +103,15 @@ export default function DataQualityPage() {
       return { key, label: LABELS[key], group: GROUPS[key], status, date: v.date, daysAgo, value: v.value }
     })
 
+    let cronStatus: CronStatus | null = null
+    try {
+      const r = await fetch("/api/cron/status", { cache: "no-store" })
+      if (r.ok) cronStatus = await r.json()
+    } catch { /* el panel mostrará "—" si la ruta falla */ }
+
     setIndicators(inds)
     setSources(sourceResults)
+    setCron(cronStatus)
     setLastCheck(new Date().toLocaleTimeString("es-ES"))
     setLoading(false)
     void tStart
@@ -136,6 +160,43 @@ export default function DataQualityPage() {
           <div className="border border-border bg-surface rounded-lg p-4">
             <div className="text-[10px] text-muted tracking-widest mb-1">STALE &gt; 90D</div>
             <div className="text-3xl font-black font-mono text-orange-400">{staleCount}</div>
+          </div>
+        </div>
+
+        {/* Cron diario */}
+        <div className="border border-border bg-surface rounded-lg overflow-hidden">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-xs font-bold tracking-widest text-accent">CRON DIARIO · SNAPSHOT</h2>
+          </div>
+          <div className="px-4 py-4">
+            {!cron ? (
+              <p className="text-xs text-muted">—</p>
+            ) : cron.neverRan ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-[10px] px-2 py-0.5 rounded bg-red-900/60 border border-red-700 text-red-300 tracking-widest">✗ NUNCA HA CORRIDO</span>
+                <span className="text-xs text-subtle">El cron de snapshots no se ha ejecutado nunca. Revisa <span className="font-mono">CRON_SECRET</span> y el despliegue en Vercel.</span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  {cron.stale
+                    ? <span className="text-[10px] px-2 py-0.5 rounded bg-red-900/60 border border-red-700 text-red-300 tracking-widest">⚠ STALE</span>
+                    : <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-900/60 border border-emerald-700 text-emerald-300 tracking-widest">✓ ACTIVO</span>}
+                  <span className="text-xs text-subtle">
+                    Última ejecución: {cron.last ? new Date(cron.last.started_at).toLocaleString("es-ES") : "—"}
+                    {cron.last?.status ? ` · ${cron.last.status.toUpperCase()}` : ""}
+                  </span>
+                </div>
+                <div className="text-xs font-mono text-muted">
+                  {cron.last?.rows_inserted != null ? `${cron.last.rows_inserted} filas insertadas` : "—"}
+                  {cron.last?.rows_failed ? ` · ${cron.last.rows_failed} fallidas` : ""}
+                  {cron.hoursSinceSuccess != null ? ` · ${cron.hoursSinceSuccess}h desde el último OK` : ""}
+                </div>
+                {cron.last?.error_summary && (
+                  <p className="text-xs text-red-400">{cron.last.error_summary}</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

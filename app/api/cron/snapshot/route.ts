@@ -57,8 +57,14 @@ async function upsertSymbolsByTicker(db: TypedClient, tickers: string[]): Promis
 }
 
 export async function GET(req: NextRequest) {
-  const auth = req.headers.get("authorization")
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  // Sin CRON_SECRET la comparación quedaría como `Bearer undefined` — un 401
+  // engañoso (y `Bearer undefined` literal pasaría). Tratamos la falta de
+  // configuración como un 500 explícito para que el fallo sea diagnosticable.
+  const secret = process.env.CRON_SECRET
+  if (!secret) {
+    return NextResponse.json({ error: "CRON_SECRET no configurada en el entorno" }, { status: 500 })
+  }
+  if (req.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
