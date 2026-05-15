@@ -16,25 +16,28 @@ ALTER TABLE industries ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "read_authenticated"
   ON industries FOR SELECT TO authenticated USING (true);
 
--- Backfill: un row por industry string único en symbols
+-- Backfill: un row por industry string único en symbols.
+-- `i` es la lista de nombres de industria distintos; el LATERAL infiere el
+-- sector dominante (el más común, ignorando NULL) para cada uno.
 INSERT INTO industries (name, sector_id)
 SELECT
-  TRIM(s.industry),
-  -- Inferir sector dominante de la industry: el sector más común entre los
-  -- símbolos que comparten ese industry string
-  (
-    SELECT s2.sector_id
-    FROM symbols s2
-    WHERE TRIM(s2.industry) = TRIM(s.industry)
-      AND s2.sector_id IS NOT NULL
-    GROUP BY s2.sector_id
-    ORDER BY count(*) DESC
-    LIMIT 1
-  )
-FROM symbols s
-WHERE s.industry IS NOT NULL
-  AND TRIM(s.industry) <> ''
-GROUP BY TRIM(s.industry)
+  i.name,
+  ds.sector_id
+FROM (
+  SELECT DISTINCT TRIM(industry) AS name
+  FROM symbols
+  WHERE industry IS NOT NULL
+    AND TRIM(industry) <> ''
+) i
+LEFT JOIN LATERAL (
+  SELECT s2.sector_id
+  FROM symbols s2
+  WHERE TRIM(s2.industry) = i.name
+    AND s2.sector_id IS NOT NULL
+  GROUP BY s2.sector_id
+  ORDER BY count(*) DESC
+  LIMIT 1
+) ds ON true
 ON CONFLICT (name) DO NOTHING;
 
 -- Agregar FK en symbols

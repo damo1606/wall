@@ -139,6 +139,9 @@ async function callLLM(prompt: string, model: string = DEFAULT_MODEL): Promise<{
       model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
+      // JSON mode: Gemini devuelve JSON válido directamente, sin envolver en texto.
+      // Hace que el path rápido de validate() acierte y reduce el uso del fallback.
+      response_format: { type: 'json_object' },
     }),
     cache: 'no-store',
   })
@@ -185,9 +188,28 @@ function tryParseJSON(text: string): Record<string, unknown> | null {
 }
 
 function extractJSONFromText(text: string): string | null {
-  // Extract JSON object from text using regex (handles LLM responses with extra text)
-  const match = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/)
-  return match?.[0] ?? null
+  // Extrae el primer objeto JSON balanceando llaves. Soporta anidamiento
+  // arbitrario (los schemas de Cadenas tienen objetos dentro de arrays) e
+  // ignora llaves que aparecen dentro de strings.
+  const start = text.indexOf('{')
+  if (start === -1) return null
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') depth++
+    else if (ch === '}' && --depth === 0) return text.slice(start, i + 1)
+  }
+  return null
 }
 
 function validate(text: string, type: AnalysisType): { data: Record<string, unknown>; score: number } {

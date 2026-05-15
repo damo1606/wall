@@ -19,7 +19,7 @@ CREATE TABLE market_snapshots (
 );
 
 CREATE UNIQUE INDEX market_snapshots_one_per_day
-  ON market_snapshots (symbol_id, (taken_at::date));
+  ON market_snapshots (symbol_id, ((taken_at AT TIME ZONE 'UTC')::date));
 
 CREATE INDEX idx_market_snapshots_symbol_taken
   ON market_snapshots (symbol_id, taken_at DESC);
@@ -60,7 +60,7 @@ CREATE TABLE fundamentals_quarterly (
 );
 
 CREATE UNIQUE INDEX fundamentals_quarterly_one_per_day
-  ON fundamentals_quarterly (symbol_id, (taken_at::date));
+  ON fundamentals_quarterly (symbol_id, ((taken_at AT TIME ZONE 'UTC')::date));
 
 CREATE INDEX idx_fundamentals_quarterly_symbol_taken
   ON fundamentals_quarterly (symbol_id, taken_at DESC);
@@ -97,7 +97,7 @@ CREATE TABLE income_metrics (
 );
 
 CREATE UNIQUE INDEX income_metrics_one_per_day
-  ON income_metrics (symbol_id, (taken_at::date));
+  ON income_metrics (symbol_id, ((taken_at AT TIME ZONE 'UTC')::date));
 
 CREATE INDEX idx_income_metrics_symbol_taken
   ON income_metrics (symbol_id, taken_at DESC);
