@@ -1,6 +1,6 @@
 import { unstable_cache } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
-import { fetchStockData, type StockData } from '@/lib/yahoo'
+import { fetchStockData, validateTickers, type StockData } from '@/lib/yahoo'
 
 // ── Environment Configuration ─────────────────────────────────────────────────
 
@@ -264,7 +264,37 @@ export type AnalysisResult = {
   data: Record<string, unknown>
   proveedor: string
   confidence: number
-  tickers_usados: string[]   // tickers cuyos datos financieros se inyectaron al prompt
+  tickers_usados: string[]          // tickers cuyos datos financieros se inyectaron al prompt
+  tickers_no_verificados: string[]  // tickers del análisis que no existen en Yahoo
+}
+
+// Recorre el JSON del análisis recogiendo todo objeto con `ticker` string no vacío.
+function collectTickerNodes(node: unknown, acc: Record<string, unknown>[]): void {
+  if (Array.isArray(node)) {
+    for (const item of node) collectTickerNodes(item, acc)
+  } else if (node && typeof node === 'object') {
+    const obj = node as Record<string, unknown>
+    if (typeof obj.ticker === 'string' && obj.ticker.trim()) acc.push(obj)
+    for (const v of Object.values(obj)) collectTickerNodes(v, acc)
+  }
+}
+
+// Valida contra Yahoo todos los tickers del análisis y anota cada objeto empresa
+// con `ticker_valido`. Devuelve la lista (sin duplicados) de tickers no verificados.
+async function annotateTickers(data: Record<string, unknown>): Promise<string[]> {
+  const nodes: Record<string, unknown>[] = []
+  collectTickerNodes(data, nodes)
+  if (nodes.length === 0) return []
+
+  const checks = await validateTickers(nodes.map(n => (n.ticker as string).trim()))
+  const noVerificados: string[] = []
+  for (const n of nodes) {
+    const ticker = (n.ticker as string).trim()
+    const valido = checks.get(ticker)?.valid ?? true
+    n.ticker_valido = valido
+    if (!valido) noVerificados.push(ticker)
+  }
+  return [...new Set(noVerificados)]
 }
 
 async function _analyze(
@@ -287,7 +317,14 @@ async function _analyze(
   const { text, proveedor } = await callLLM(prompt)
   const { data, score } = validate(text, type)
   if (score < 0.5) throw new Error('Respuesta incompleta del LLM. Intenta de nuevo.')
-  return { data, proveedor, confidence: score, tickers_usados: stocks.map(s => s.symbol) }
+  const tickers_no_verificados = await annotateTickers(data)
+  return {
+    data,
+    proveedor,
+    confidence: score,
+    tickers_usados: stocks.map(s => s.symbol),
+    tickers_no_verificados,
+  }
 }
 
 // ── Validation for API routes ────────────────────────────────────────────────

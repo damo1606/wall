@@ -1,3 +1,5 @@
+import { unstable_cache } from 'next/cache'
+
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 const FETCH_TIMEOUT_MS = 8_000
@@ -89,6 +91,68 @@ async function getCrumb(): Promise<{ crumb: string; cookie: string } | null> {
   const ok = await refreshCrumb()
   if (!ok || !_crumb || !_cookie) return null
   return { crumb: _crumb, cookie: _cookie }
+}
+
+// ── Validación de tickers ──────────────────────────────────────────────────
+// Comprueba que un ticker exista en Yahoo Finance. Los prompts de Cadenas pueden
+// devolver tickers alucinados; esto los detecta vía el endpoint de búsqueda.
+
+export type TickerCheck = { valid: boolean; yahooSymbol: string | null }
+
+// Quita el prefijo de mercado: "NYSE:VRT" → "VRT", "VRT" → "VRT".
+function stripExchangePrefix(ticker: string): string {
+  const t = ticker.trim()
+  const colon = t.lastIndexOf(":")
+  return (colon >= 0 ? t.slice(colon + 1) : t).trim().toUpperCase()
+}
+
+// Comprueba un único símbolo (ya sin prefijo) contra v1/finance/search.
+// Fail-open: ante error de red / Yahoo caído devuelve valid:true para no
+// marcar falsos negativos.
+async function _checkSymbol(fragment: string): Promise<TickerCheck> {
+  if (!fragment) return { valid: true, yahooSymbol: null }
+  try {
+    const auth = await getCrumb()
+    const crumb = auth?.crumb ? `&crumb=${encodeURIComponent(auth.crumb)}` : ""
+    const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(fragment)}&quotesCount=10&newsCount=0&enableFuzzyQuery=true${crumb}`
+    const res = await fetchWithTimeout(url, {
+      headers: { "User-Agent": UA, ...(auth?.cookie ? { Cookie: auth.cookie } : {}) },
+      cache: "no-store",
+    })
+    if (!res.ok) return { valid: true, yahooSymbol: null }
+    const json = await res.json()
+    const quotes: { symbol?: string; quoteType?: string }[] = json?.quotes ?? []
+    const hit = quotes.find(q => {
+      if (!q.symbol || !["EQUITY", "ETF", "INDEX"].includes(q.quoteType ?? "")) return false
+      const sym = q.symbol.toUpperCase()
+      return sym === fragment || sym.split(".")[0] === fragment
+    })
+    return hit ? { valid: true, yahooSymbol: hit.symbol! } : { valid: false, yahooSymbol: null }
+  } catch {
+    return { valid: true, yahooSymbol: null }
+  }
+}
+
+// La existencia de un ticker es estable → caché de 30 días por símbolo.
+const _checkSymbolCached = unstable_cache(_checkSymbol, ['ticker-validate'], {
+  revalidate: 2_592_000,
+  tags: ['tickers'],
+})
+
+/**
+ * Valida una lista de tickers contra Yahoo Finance. Acepta tickers con prefijo
+ * de mercado (NYSE:VRT → busca "VRT"). Devuelve un mapa del ticker ORIGINAL
+ * (tal cual se pasó) a su resultado de validación.
+ */
+export async function validateTickers(tickers: string[]): Promise<Map<string, TickerCheck>> {
+  const result = new Map<string, TickerCheck>()
+  const unique = [...new Set(tickers.map(t => t.trim()).filter(Boolean))]
+  await Promise.all(
+    unique.map(async original => {
+      result.set(original, await _checkSymbolCached(stripExchangePrefix(original)))
+    }),
+  )
+  return result
 }
 
 export type StockData = {

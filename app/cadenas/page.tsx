@@ -71,7 +71,16 @@ function Badge({ v, colors }: { v: string; colors: Record<string, string> }) {
   return <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${cls}`}>{v}</span>
 }
 
-type Empresa = { empresa: string; ticker?: string; pais?: string; cuota_mercado?: string }
+type Empresa = { empresa: string; ticker?: string; ticker_valido?: boolean; pais?: string; cuota_mercado?: string }
+
+// Ticker con marca de verificación: ámbar + ⚠ si no se resolvió en Yahoo Finance.
+function Ticker({ value, valido }: { value?: string; valido?: boolean }) {
+  if (!value) return null
+  if (valido === false) {
+    return <span title="No verificado en Yahoo Finance" className="font-bold text-amber-400">⚠ {value}</span>
+  }
+  return <span className="font-bold text-blue-300">{value}</span>
+}
 
 // Chips empresa+ticker — cada eslabón es un nodo invertible
 function CompanyChips({ empresas }: { empresas: Empresa[] }) {
@@ -80,7 +89,7 @@ function CompanyChips({ empresas }: { empresas: Empresa[] }) {
     <div className="flex flex-wrap gap-1.5 mt-1.5">
       {empresas.map((e, i) => (
         <span key={i} className="inline-flex items-center gap-1.5 text-[11px] bg-gray-700 px-2 py-1 rounded">
-          {e.ticker ? <span className="font-bold text-blue-300">{e.ticker}</span> : null}
+          <Ticker value={e.ticker} valido={e.ticker_valido} />
           <span className="text-gray-200">{e.empresa}</span>
           {e.pais ? <span className="text-gray-500">{e.pais}</span> : null}
           {e.cuota_mercado ? <span className="text-gray-400">{e.cuota_mercado}</span> : null}
@@ -93,7 +102,7 @@ function CompanyChips({ empresas }: { empresas: Empresa[] }) {
 function SupplyResult({ d }: { d: Record<string, unknown> }) {
   const cadena = d.cadena_inversa as {
     tier: string; insumo: string; descripcion: string
-    empresas: { empresa: string; ticker?: string; pais?: string; cuota_mercado?: string; sustituibilidad?: string }[]
+    empresas: { empresa: string; ticker?: string; ticker_valido?: boolean; pais?: string; cuota_mercado?: string; sustituibilidad?: string }[]
   }[] ?? []
   const spof = d.single_point_of_failure as {
     punto: string; tipo: string; descripcion: string; empresas_implicadas: string[]; severidad: string
@@ -117,7 +126,7 @@ function SupplyResult({ d }: { d: Record<string, unknown> }) {
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {(link.empresas ?? []).map((e, j) => (
                   <span key={j} className="inline-flex items-center gap-1.5 text-[11px] bg-gray-700 px-2 py-1 rounded">
-                    {e.ticker ? <span className="font-bold text-blue-300">{e.ticker}</span> : null}
+                    <Ticker value={e.ticker} valido={e.ticker_valido} />
                     <span className="text-gray-200">{e.empresa}</span>
                     {e.pais ? <span className="text-gray-500">{e.pais}</span> : null}
                     {e.cuota_mercado ? <span className="text-gray-400">{e.cuota_mercado}</span> : null}
@@ -306,7 +315,7 @@ const SENAL_CONFIG: Record<string, { cls: string; label: string }> = {
 // Bloque común a los 3 análisis: tickers clasificados por oportunidad de inversión
 function OportunidadesResult({ d }: { d: Record<string, unknown> }) {
   const ops = d.oportunidades_inversion as
-    { ticker: string; empresa: string; senal: string; tesis: string }[] ?? []
+    { ticker: string; ticker_valido?: boolean; empresa: string; senal: string; tesis: string }[] ?? []
   if (ops.length === 0) return null
 
   return (
@@ -320,7 +329,7 @@ function OportunidadesResult({ d }: { d: Record<string, unknown> }) {
           return (
             <div key={i} className={`rounded-lg p-3 border ${s.cls}`}>
               <div className="flex items-center gap-2 mb-1">
-                <span className="font-bold text-sm text-white">{o.ticker}</span>
+                <span className="text-sm"><Ticker value={o.ticker} valido={o.ticker_valido} /></span>
                 <span className="text-xs text-gray-400 flex-1">{o.empresa}</span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-black/30">{s.label}</span>
               </div>
@@ -347,6 +356,7 @@ interface AnalysisState {
   result: Record<string, unknown> | null
   proveedor: string
   tickersUsados: string[]
+  tickersNoVerificados: string[]
   error: string
 }
 
@@ -360,6 +370,7 @@ export default function CadenasPage() {
     result: null,
     proveedor: "",
     tickersUsados: [],
+    tickersNoVerificados: [],
     error: "",
   })
 
@@ -369,7 +380,7 @@ export default function CadenasPage() {
       return
     }
 
-    setState(prev => ({ ...prev, activeTab: tab, loading: true, error: "", result: null, tickersUsados: [] }))
+    setState(prev => ({ ...prev, activeTab: tab, loading: true, error: "", result: null, tickersUsados: [], tickersNoVerificados: [] }))
 
     try {
       const res = await fetch(API_URLS[tab], {
@@ -383,7 +394,7 @@ export default function CadenasPage() {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? "Error desconocido")
-      setState(prev => ({ ...prev, result: json.data, proveedor: json.proveedor, tickersUsados: json.tickers_usados ?? [] }))
+      setState(prev => ({ ...prev, result: json.data, proveedor: json.proveedor, tickersUsados: json.tickers_usados ?? [], tickersNoVerificados: json.tickers_no_verificados ?? [] }))
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Error desconocido"
       setState(prev => ({ ...prev, error: msg }))
@@ -505,6 +516,11 @@ export default function CadenasPage() {
         {/* Results */}
         {state.result && !state.loading && (
           <div>
+            {state.tickersNoVerificados.length > 0 && (
+              <div className="bg-amber-900/20 border border-amber-800/30 rounded-xl p-3 mb-4 text-xs text-amber-400">
+                ⚠ {state.tickersNoVerificados.length} ticker(s) no verificados en Yahoo: {state.tickersNoVerificados.join(", ")}
+              </div>
+            )}
             {state.activeTab === "supply" && <SupplyResult d={state.result} />}
             {state.activeTab === "value"  && <ValueResult d={state.result} />}
             {state.activeTab === "foda"   && <FodaResult d={state.result} />}
