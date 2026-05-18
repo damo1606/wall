@@ -51,9 +51,53 @@ function ImpactBadge({ v }: ImpactBadgeProps) {
   return <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${cls}`}>{v}</span>
 }
 
+// Sustituibilidad de un proveedor en la cadena inversa
+const SUSTITUIBILIDAD_COLORS: Record<string, string> = {
+  exclusivo:   "bg-red-900/40 text-red-300",
+  dominante:   "bg-orange-900/40 text-orange-300",
+  competitivo: "bg-green-900/40 text-green-300",
+}
+
+// Severidad de un single point of failure
+const SEVERIDAD_COLORS: Record<string, string> = {
+  critico: "bg-red-900/40 text-red-300",
+  alto:    "bg-orange-900/40 text-orange-300",
+  medio:   "bg-yellow-900/40 text-yellow-300",
+}
+
+function Badge({ v, colors }: { v: string; colors: Record<string, string> }) {
+  if (!v) return null
+  const cls = colors[v.toLowerCase()] ?? "bg-gray-800 text-gray-400"
+  return <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${cls}`}>{v}</span>
+}
+
+type Empresa = { empresa: string; ticker?: string; pais?: string; cuota_mercado?: string }
+
+// Chips empresa+ticker — cada eslabón es un nodo invertible
+function CompanyChips({ empresas }: { empresas: Empresa[] }) {
+  if (!empresas || empresas.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-1.5">
+      {empresas.map((e, i) => (
+        <span key={i} className="inline-flex items-center gap-1.5 text-[11px] bg-gray-700 px-2 py-1 rounded">
+          {e.ticker ? <span className="font-bold text-blue-300">{e.ticker}</span> : null}
+          <span className="text-gray-200">{e.empresa}</span>
+          {e.pais ? <span className="text-gray-500">{e.pais}</span> : null}
+          {e.cuota_mercado ? <span className="text-gray-400">{e.cuota_mercado}</span> : null}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function SupplyResult({ d }: { d: Record<string, unknown> }) {
-  const actores = d.actores_clave as { nombre: string; rol: string; ejemplos: string[] }[] ?? []
-  const flujo = d.flujo_materiales as { etapa: string; descripcion: string }[] ?? []
+  const cadena = d.cadena_inversa as {
+    tier: string; insumo: string; descripcion: string
+    empresas: { empresa: string; ticker?: string; pais?: string; cuota_mercado?: string; sustituibilidad?: string }[]
+  }[] ?? []
+  const spof = d.single_point_of_failure as {
+    punto: string; tipo: string; descripcion: string; empresas_implicadas: string[]; severidad: string
+  }[] ?? []
   const riesgos = d.puntos_riesgo as { riesgo: string; impacto: string; mitigacion: string }[] ?? []
   const kpis = d.indicadores_clave as string[] ?? []
   const tendencias = d.tendencias as string[] ?? []
@@ -61,15 +105,24 @@ function SupplyResult({ d }: { d: Record<string, unknown> }) {
   return (
     <div className="space-y-4">
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Actores Clave</h4>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-          {actores.map((a, i) => (
+        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Cadena Inversa · tier-1 → tier-3</h4>
+        <div className="space-y-3">
+          {cadena.map((link, i) => (
             <div key={i} className="bg-gray-800 rounded-lg p-3">
-              <div className="font-medium text-sm mb-1">{a.nombre}</div>
-              <div className="text-xs text-gray-400 mb-2">{a.rol}</div>
-              <div className="flex flex-wrap gap-1">
-                {(a.ejemplos ?? []).map((e, j) => (
-                  <span key={j} className="text-xs bg-gray-700 px-2 py-0.5 rounded">{e}</span>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-blue-900/50 text-blue-300">{link.tier}</span>
+                <span className="text-sm font-medium flex-1">{link.insumo}</span>
+              </div>
+              <div className="text-xs text-gray-400">{link.descripcion}</div>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {(link.empresas ?? []).map((e, j) => (
+                  <span key={j} className="inline-flex items-center gap-1.5 text-[11px] bg-gray-700 px-2 py-1 rounded">
+                    {e.ticker ? <span className="font-bold text-blue-300">{e.ticker}</span> : null}
+                    <span className="text-gray-200">{e.empresa}</span>
+                    {e.pais ? <span className="text-gray-500">{e.pais}</span> : null}
+                    {e.cuota_mercado ? <span className="text-gray-400">{e.cuota_mercado}</span> : null}
+                    {e.sustituibilidad ? <Badge v={e.sustituibilidad} colors={SUSTITUIBILIDAD_COLORS} /> : null}
+                  </span>
                 ))}
               </div>
             </div>
@@ -77,20 +130,28 @@ function SupplyResult({ d }: { d: Record<string, unknown> }) {
         </div>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Flujo de Materiales</h4>
-        <div className="space-y-2">
-          {flujo.map((f, i) => (
-            <div key={i} className="flex gap-3 items-start">
-              <div className="w-6 h-6 rounded-full bg-blue-900 text-blue-300 text-xs flex items-center justify-center flex-shrink-0 font-bold">{i + 1}</div>
-              <div>
-                <div className="text-sm font-medium">{f.etapa}</div>
-                <div className="text-xs text-gray-400">{f.descripcion}</div>
+      {spof.length > 0 && (
+        <div className="bg-gray-900 border border-red-800/40 rounded-xl p-4">
+          <h4 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3">⚠️ Single Point of Failure</h4>
+          <div className="space-y-2">
+            {spof.map((s, i) => (
+              <div key={i} className="bg-red-950/30 border border-red-900/40 rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-medium flex-1">{s.punto}</span>
+                  {s.tipo ? <span className="text-[10px] text-gray-500 uppercase">{s.tipo}</span> : null}
+                  <Badge v={s.severidad} colors={SEVERIDAD_COLORS} />
+                </div>
+                <div className="text-xs text-gray-400">{s.descripcion}</div>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {(s.empresas_implicadas ?? []).map((e, j) => (
+                    <span key={j} className="text-[11px] bg-gray-800 px-2 py-0.5 rounded text-gray-300">{e}</span>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
         <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Puntos de Riesgo</h4>
@@ -122,8 +183,8 @@ function SupplyResult({ d }: { d: Record<string, unknown> }) {
 }
 
 function ValueResult({ d }: { d: Record<string, unknown> }) {
-  const primarias = d.actividades_primarias as { actividad: string; descripcion: string; margen_tipico: string }[] ?? []
-  const soporte = d.actividades_soporte as { actividad: string; descripcion: string }[] ?? []
+  const primarias = d.actividades_primarias as { actividad: string; descripcion: string; margen_tipico: string; empresas_dominantes?: Empresa[] }[] ?? []
+  const soporte = d.actividades_soporte as { actividad: string; descripcion: string; empresas_dominantes?: Empresa[] }[] ?? []
   const ventajas = d.ventajas_competitivas as string[] ?? []
   const drivers = d.drivers_valor as string[] ?? []
   const margen = d.margen_industria as { minimo: string; promedio: string; maximo: string } | undefined
@@ -147,6 +208,7 @@ function ValueResult({ d }: { d: Record<string, unknown> }) {
                 <span className="text-xs text-green-400 font-semibold ml-2">{a.margen_tipico}</span>
               </div>
               <div className="text-xs text-gray-400">{a.descripcion}</div>
+              <CompanyChips empresas={a.empresas_dominantes ?? []} />
             </div>
           ))}
         </div>
@@ -158,6 +220,7 @@ function ValueResult({ d }: { d: Record<string, unknown> }) {
             <div key={i} className="bg-gray-800 rounded-lg p-3">
               <div className="font-medium text-sm mb-1">{a.actividad}</div>
               <div className="text-xs text-gray-400">{a.descripcion}</div>
+              <CompanyChips empresas={a.empresas_dominantes ?? []} />
             </div>
           ))}
         </div>
@@ -176,11 +239,23 @@ function ValueResult({ d }: { d: Record<string, unknown> }) {
   )
 }
 
+function FodaItem({ punto, badge, empresas }: { punto: string; badge: string; empresas?: Empresa[] }) {
+  return (
+    <li className="text-sm">
+      <div className="flex gap-2 items-start">
+        <span className="flex-1 text-gray-300">{punto}</span>
+        <ImpactBadge v={badge} />
+      </div>
+      <CompanyChips empresas={empresas ?? []} />
+    </li>
+  )
+}
+
 function FodaResult({ d }: { d: Record<string, unknown> }) {
-  const fortalezas = d.fortalezas as { punto: string; impacto: string }[] ?? []
-  const oportunidades = d.oportunidades as { punto: string; horizonte: string }[] ?? []
-  const debilidades = d.debilidades as { punto: string; urgencia: string }[] ?? []
-  const amenazas = d.amenazas as { punto: string; probabilidad: string }[] ?? []
+  const fortalezas = d.fortalezas as { punto: string; impacto: string; empresas?: Empresa[] }[] ?? []
+  const oportunidades = d.oportunidades as { punto: string; horizonte: string; empresas?: Empresa[] }[] ?? []
+  const debilidades = d.debilidades as { punto: string; urgencia: string; empresas?: Empresa[] }[] ?? []
+  const amenazas = d.amenazas as { punto: string; probabilidad: string; empresas?: Empresa[] }[] ?? []
   const estrategia = d.estrategia_recomendada as string
 
   return (
@@ -189,25 +264,25 @@ function FodaResult({ d }: { d: Record<string, unknown> }) {
         <div className="bg-gray-900 border border-green-800/30 rounded-xl p-4">
           <h4 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-3">✅ Fortalezas</h4>
           <ul className="space-y-2">{fortalezas.map((f, i) => (
-            <li key={i} className="text-sm flex gap-2 items-start"><span className="flex-1 text-gray-300">{f.punto}</span><ImpactBadge v={f.impacto} /></li>
+            <FodaItem key={i} punto={f.punto} badge={f.impacto} empresas={f.empresas} />
           ))}</ul>
         </div>
         <div className="bg-gray-900 border border-blue-800/30 rounded-xl p-4">
           <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider mb-3">🚀 Oportunidades</h4>
           <ul className="space-y-2">{oportunidades.map((o, i) => (
-            <li key={i} className="text-sm flex gap-2 items-start"><span className="flex-1 text-gray-300">{o.punto}</span><ImpactBadge v={o.horizonte} /></li>
+            <FodaItem key={i} punto={o.punto} badge={o.horizonte} empresas={o.empresas} />
           ))}</ul>
         </div>
         <div className="bg-gray-900 border border-yellow-800/30 rounded-xl p-4">
           <h4 className="text-xs font-semibold text-yellow-400 uppercase tracking-wider mb-3">⚠️ Debilidades</h4>
           <ul className="space-y-2">{debilidades.map((d2, i) => (
-            <li key={i} className="text-sm flex gap-2 items-start"><span className="flex-1 text-gray-300">{d2.punto}</span><ImpactBadge v={d2.urgencia} /></li>
+            <FodaItem key={i} punto={d2.punto} badge={d2.urgencia} empresas={d2.empresas} />
           ))}</ul>
         </div>
         <div className="bg-gray-900 border border-red-800/30 rounded-xl p-4">
           <h4 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3">🔴 Amenazas</h4>
           <ul className="space-y-2">{amenazas.map((a, i) => (
-            <li key={i} className="text-sm flex gap-2 items-start"><span className="flex-1 text-gray-300">{a.punto}</span><ImpactBadge v={a.probabilidad} /></li>
+            <FodaItem key={i} punto={a.punto} badge={a.probabilidad} empresas={a.empresas} />
           ))}</ul>
         </div>
       </div>

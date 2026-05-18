@@ -22,42 +22,75 @@ const ERROR_MESSAGES = {
 // ── Prompts ───────────────────────────────────────────────────────────────────
 // `finanzas` es un bloque de métricas reales (Yahoo Finance) o "" si no hay tickers.
 
-type PromptFn = (sector: string, subsector: string, finanzas: string) => string
+type PromptFn = (sector: string, subsector: string, finanzas: string, empresas: string[]) => string
+
+// Ancla el análisis en empresas concretas cuando el usuario introduce tickers:
+// el LLM reconstruye la cadena partiendo de ellas, no de generalidades del subsector.
+function anchorBlock(empresas: string[]): string {
+  if (empresas.length === 0) return ''
+  return `\nPUNTO DE PARTIDA: ancla el análisis en estas empresas cotizadas — ${empresas.join(', ')}. ` +
+    `Reconstruye su cadena partiendo de ellas, no de generalidades del subsector.\n`
+}
+
+// Directiva de precisión común a los 3 análisis: empresas concretas, tickers
+// globales con prefijo de mercado, sin inventar.
+const PRECISION_INSTR =
+  'PRECISIÓN MÁXIMA: nombra siempre empresas cotizadas concretas, nunca categorías genéricas ' +
+  '("varios fabricantes", "proveedores asiáticos"). Cada "ticker" lleva prefijo de mercado ' +
+  '(NYSE:, NASDAQ:, TSE:, KRX:, XETRA:, TPE:, LSE:…). Si no conoces el ticker exacto, deja ' +
+  '"ticker":"" — jamás lo inventes. Cuantifica cuota de mercado y país siempre que se pueda.'
 
 // Objetivo del usuario: comprar barato, vender caro. Cada análisis debe terminar con
 // tickers bursátiles reales clasificados por valoración (compra / venta / mantener).
 const OPORTUNIDADES_INSTR =
-  'OBLIGATORIO: en "oportunidades_inversion" lista de 4 a 8 empresas cotizadas reales del subsector ' +
-  'con su ticker bursátil exacto (símbolo de la bolsa). Clasifica cada "senal" como ' +
-  '"barato" (infravalorada, candidata a COMPRA), "caro" (sobrevalorada, candidata a VENTA) o "justo". ' +
-  'Si hay datos financieros, fundamenta la señal en ellos (PE, ROIC, márgenes, crecimiento). ' +
-  '"tesis" es una sola línea explicando por qué comprar o vender.'
+  'OBLIGATORIO: en "oportunidades_inversion" lista de 4 a 8 empresas cotizadas reales del subsector. ' +
+  'Cada "ticker" DEBE llevar prefijo de mercado (NYSE:VRT, NASDAQ:NVDA, TSE:8035, KRX:005930, ' +
+  'XETRA:LIN, TPE:2330, LSE:RIO). No inventes tickers: si no conoces el exacto, deja "ticker":"". ' +
+  'Clasifica cada "senal" como "barato" (infravalorada, candidata a COMPRA), "caro" (sobrevalorada, ' +
+  'candidata a VENTA) o "justo". Si hay datos financieros, fundamenta la señal en ellos ' +
+  '(PE, ROIC, márgenes, crecimiento). "tesis" es una sola línea explicando por qué comprar o vender.'
 
 const OPORTUNIDADES_SCHEMA =
   '"oportunidades_inversion":[{"ticker":"","empresa":"","senal":"barato|caro|justo","tesis":""}]'
 
-const SUPPLY_CHAIN_PROMPT: PromptFn = (sector, subsector, finanzas) => `
-Experto en cadenas de suministro globales. Analiza el subsector "${subsector}" del sector "${sector}".
-${finanzas}
-Si hay datos financieros, úsalos para justificar riesgos y puntos críticos. ${OPORTUNIDADES_INSTR}
+const SUPPLY_CHAIN_PROMPT: PromptFn = (sector, subsector, finanzas, empresas) => `
+Eres analista de capital riesgo e inversor institucional experto en cadenas de suministro globales.
+Analiza el subsector "${subsector}" del sector "${sector}".
+${finanzas}${anchorBlock(empresas)}
+Haz INGENIERÍA INVERSA de la cadena: parte del producto final y desciende tier-1 → tier-2 → tier-3
+hacia atrás, hasta las materias primas, gases purificados, químicos, resinas, metales raros y
+equipos de fabricación indispensables. En cada eslabón identifica las empresas dominantes o
+exclusivas que lo controlan y marca su "sustituibilidad": "exclusivo" (monopolio de facto),
+"dominante" (líder difícil de reemplazar) o "competitivo". Identifica cualquier "single point of
+failure" — un único proveedor, planta, químico o región cuya caída paralizaría la cadena.
+${PRECISION_INSTR} ${OPORTUNIDADES_INSTR}
 Responde SOLO JSON válido, sin texto adicional:
-{"subsector":"${subsector}","actores_clave":[{"nombre":"","rol":"","ejemplos":[]}],"flujo_materiales":[{"etapa":"","descripcion":"","actores":[]}],"puntos_riesgo":[{"riesgo":"","impacto":"alto|medio|bajo","mitigacion":""}],"indicadores_clave":[],"tendencias":[],${OPORTUNIDADES_SCHEMA}}
+{"subsector":"${subsector}","cadena_inversa":[{"tier":"tier-1|tier-2|tier-3","insumo":"","descripcion":"","empresas":[{"empresa":"","ticker":"","pais":"","cuota_mercado":"","sustituibilidad":"exclusivo|dominante|competitivo"}]}],"single_point_of_failure":[{"punto":"","tipo":"quimico|fisico|geografico|tecnologico","descripcion":"","empresas_implicadas":[],"severidad":"critico|alto|medio"}],"puntos_riesgo":[{"riesgo":"","impacto":"alto|medio|bajo","mitigacion":""}],"indicadores_clave":[],"tendencias":[],${OPORTUNIDADES_SCHEMA}}
 `
 
-const VALUE_CHAIN_PROMPT: PromptFn = (sector, subsector, finanzas) => `
-Experto en cadena de valor y framework Porter. Analiza el subsector "${subsector}" del sector "${sector}".
-${finanzas}
-Si hay datos financieros, compara los márgenes reportados con los típicos de la industria. ${OPORTUNIDADES_INSTR}
+const VALUE_CHAIN_PROMPT: PromptFn = (sector, subsector, finanzas, empresas) => `
+Eres analista de capital riesgo experto en cadena de valor y framework Porter.
+Analiza el subsector "${subsector}" del sector "${sector}".
+${finanzas}${anchorBlock(empresas)}
+Para CADA actividad primaria y de soporte nombra las empresas cotizadas que la dominan, con su
+ticker global y cuota de mercado — cada eslabón de la cadena de valor debe ser un nodo invertible.
+Si hay datos financieros, compara los márgenes reportados con los típicos de la industria.
+${PRECISION_INSTR} ${OPORTUNIDADES_INSTR}
 Responde SOLO JSON válido, sin texto adicional:
-{"subsector":"${subsector}","actividades_primarias":[{"actividad":"","descripcion":"","margen_tipico":"X-Y%"}],"actividades_soporte":[{"actividad":"","descripcion":""}],"ventajas_competitivas":[],"drivers_valor":[],"margen_industria":{"minimo":"X%","maximo":"Y%","promedio":"Z%"},${OPORTUNIDADES_SCHEMA}}
+{"subsector":"${subsector}","actividades_primarias":[{"actividad":"","descripcion":"","margen_tipico":"X-Y%","empresas_dominantes":[{"empresa":"","ticker":"","pais":"","cuota_mercado":""}]}],"actividades_soporte":[{"actividad":"","descripcion":"","empresas_dominantes":[{"empresa":"","ticker":""}]}],"ventajas_competitivas":[],"drivers_valor":[],"margen_industria":{"minimo":"X%","maximo":"Y%","promedio":"Z%"},${OPORTUNIDADES_SCHEMA}}
 `
 
-const FODA_PROMPT: PromptFn = (sector, subsector, finanzas) => `
-Consultor estratégico sectorial. Realiza un FODA del subsector "${subsector}" del sector "${sector}".
-${finanzas}
-Si hay datos financieros, cada punto debe citar una métrica (ROIC, márgenes, deuda, crecimiento, valoración). ${OPORTUNIDADES_INSTR}
+const FODA_PROMPT: PromptFn = (sector, subsector, finanzas, empresas) => `
+Eres consultor estratégico e inversor institucional. Realiza un FODA del subsector "${subsector}"
+del sector "${sector}".
+${finanzas}${anchorBlock(empresas)}
+Cada punto del FODA debe citar las empresas cotizadas concretas que lo encarnan, con su ticker
+global — una amenaza es un competidor con nombre y ticker, una oportunidad es una empresa
+invertible. Si hay datos financieros, cada punto cita además una métrica (ROIC, márgenes, deuda,
+crecimiento, valoración).
+${PRECISION_INSTR} ${OPORTUNIDADES_INSTR}
 Responde SOLO JSON válido, sin texto adicional:
-{"subsector":"${subsector}","fortalezas":[{"punto":"","impacto":"alto|medio|bajo"}],"oportunidades":[{"punto":"","horizonte":"corto|medio|largo"}],"debilidades":[{"punto":"","urgencia":"alta|media|baja"}],"amenazas":[{"punto":"","probabilidad":"alta|media|baja"}],"estrategia_recomendada":"",${OPORTUNIDADES_SCHEMA}}
+{"subsector":"${subsector}","fortalezas":[{"punto":"","impacto":"alto|medio|bajo","empresas":[{"empresa":"","ticker":""}]}],"oportunidades":[{"punto":"","horizonte":"corto|medio|largo","empresas":[{"empresa":"","ticker":""}]}],"debilidades":[{"punto":"","urgencia":"alta|media|baja","empresas":[{"empresa":"","ticker":""}]}],"amenazas":[{"punto":"","probabilidad":"alta|media|baja","empresas":[{"empresa":"","ticker":""}]}],"estrategia_recomendada":"",${OPORTUNIDADES_SCHEMA}}
 `
 
 // ── Bloque de datos financieros (Yahoo Finance) ───────────────────────────────
@@ -157,7 +190,7 @@ async function callLLM(prompt: string, model: string = DEFAULT_MODEL): Promise<{
 const ANALYSIS_CONFIG = {
   supply_chain: {
     prompt: SUPPLY_CHAIN_PROMPT,
-    required: ['actores_clave', 'flujo_materiales', 'puntos_riesgo'],
+    required: ['cadena_inversa', 'puntos_riesgo', 'tendencias'],
   },
   value_chain: {
     prompt: VALUE_CHAIN_PROMPT,
@@ -250,7 +283,7 @@ async function _analyze(
     : []
   const finanzas = buildFinanceBlock(stocks)
 
-  const prompt = config.prompt(sector, subsector, finanzas)
+  const prompt = config.prompt(sector, subsector, finanzas, stocks.map(s => s.symbol))
   const { text, proveedor } = await callLLM(prompt)
   const { data, score } = validate(text, type)
   if (score < 0.5) throw new Error('Respuesta incompleta del LLM. Intenta de nuevo.')
