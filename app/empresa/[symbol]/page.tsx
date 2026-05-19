@@ -180,6 +180,94 @@ function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: nu
   )
 }
 
+// ─── Sección Pronóstico (AR + GARCH) ────────────────────────────────────────
+
+type ForecastApi = {
+  lastPrice: number
+  futurePrices: number[]
+  upperBand: number[]
+  lowerBand: number[]
+  arOrder: number
+  garch: { omega: number; alpha: number; beta: number }
+  expectedMovePct: number
+  score: number
+  observations: number
+}
+
+function ForecastSection({ symbol }: { symbol: string }) {
+  const [fc, setFc]           = useState<ForecastApi | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState("")
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true); setError("")
+    fetch(`/api/forecast?symbol=${symbol}&steps=30`)
+      .then(async r => {
+        const j = await r.json()
+        if (cancelled) return
+        if (!r.ok) { setError(j.error ?? "No disponible"); setFc(null) }
+        else setFc(j)
+      })
+      .catch(() => { if (!cancelled) setError("Error al cargar el pronóstico") })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [symbol])
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+          Pronóstico · ARIMA + GARCH (30 velas)
+        </h2>
+        {fc && <span className="text-[10px] text-gray-600">AR({fc.arOrder}) · {fc.observations} obs</span>}
+      </div>
+
+      {loading && <div className="text-gray-600 text-sm py-8 text-center animate-pulse">Estimando modelo...</div>}
+      {error && !loading && <div className="text-gray-600 text-sm py-4">Pronóstico no disponible — {error}</div>}
+
+      {fc && !loading && (() => {
+        const W = 640, H = 220, PAD = 10
+        const center = [fc.lastPrice, ...fc.futurePrices]
+        const upper  = [fc.lastPrice, ...fc.upperBand]
+        const lower  = [fc.lastPrice, ...fc.lowerBand]
+        const n = center.length
+        const yMin = Math.min(...lower)
+        const yMax = Math.max(...upper)
+        const xAt = (i: number) => PAD + (i / (n - 1)) * (W - 2 * PAD)
+        const yAt = (v: number) => PAD + (1 - (v - yMin) / (yMax - yMin || 1)) * (H - 2 * PAD)
+        const bandPath =
+          "M " + upper.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" L ") +
+          " L " + lower.slice().reverse().map((v, i) => `${xAt(n - 1 - i)},${yAt(v)}`).join(" L ") + " Z"
+        const linePath = "M " + center.map((v, i) => `${xAt(i)},${yAt(v)}`).join(" L ")
+        const finalPrice = fc.futurePrices[fc.futurePrices.length - 1]
+        const moveColor  = fc.expectedMovePct >= 0 ? "text-green-400" : "text-red-400"
+        const scoreColor = fc.score > 0.3 ? "text-green-400" : fc.score < -0.3 ? "text-red-400" : "text-gray-300"
+        return (
+          <div>
+            <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 220 }}>
+              <path d={bandPath} fill="#3b82f6" opacity={0.15} />
+              <line x1={xAt(0)} y1={yAt(fc.lastPrice)} x2={xAt(n - 1)} y2={yAt(fc.lastPrice)}
+                stroke="#6b7280" strokeWidth={1} strokeDasharray="4 3" />
+              <path d={linePath} fill="none" stroke="#60a5fa" strokeWidth={2} />
+            </svg>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+              <div><div className="text-[10px] text-gray-500">Precio proyectado</div><div className="font-mono text-white font-bold">${finalPrice.toFixed(2)}</div></div>
+              <div><div className="text-[10px] text-gray-500">Movimiento esperado</div><div className={`font-mono font-bold ${moveColor}`}>{pct(fc.expectedMovePct)}</div></div>
+              <div><div className="text-[10px] text-gray-500">Score retorno/vol</div><div className={`font-mono font-bold ${scoreColor}`}>{fc.score.toFixed(2)}</div></div>
+              <div><div className="text-[10px] text-gray-500">GARCH α / β</div><div className="font-mono text-gray-300">{fc.garch.alpha.toFixed(2)} / {fc.garch.beta.toFixed(2)}</div></div>
+            </div>
+            <p className="text-[11px] text-gray-600 mt-3">
+              Banda de volatilidad 95% (GARCH). Un pronóstico estadístico no es garantía de
+              retorno — úsalo como rango probable, no como certeza.
+            </p>
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
+
 // ─── Página ──────────────────────────────────────────────────────────────────
 
 export default function EmpresaPage() {
@@ -314,6 +402,9 @@ export default function EmpresaPage() {
 
         {/* Gráfica histórica — visible al primer vistazo */}
         <PriceChart symbol={symbol} grahamNumber={data.grahamNumber} />
+
+        {/* Pronóstico AR + GARCH */}
+        <ForecastSection symbol={symbol} />
 
         {/* Acciones rápidas */}
         <div className="flex flex-wrap gap-2 mb-6">
