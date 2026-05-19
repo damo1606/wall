@@ -155,6 +155,43 @@ export async function validateTickers(tickers: string[]): Promise<Map<string, Ti
   return result
 }
 
+// ── Histórico de precios ───────────────────────────────────────────────────
+
+export type PricePoint = { date: string; close: number }
+
+/**
+ * Descarga la serie de cierres diarios de un símbolo desde Yahoo Finance.
+ * `range` admite los rangos de Yahoo ("6mo", "1y", "2y", "5y"…).
+ * Devuelve [] si Yahoo falla o el símbolo no tiene datos.
+ */
+export async function fetchPriceHistory(symbol: string, range = "1y"): Promise<PricePoint[]> {
+  try {
+    const auth = await getCrumb()
+    if (!auth) return []
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`
+      + `?interval=1d&range=${encodeURIComponent(range)}&crumb=${encodeURIComponent(auth.crumb)}`
+    const res = await fetchWithTimeout(url, {
+      headers: { "User-Agent": UA, Cookie: auth.cookie },
+      cache: "no-store",
+    })
+    if (!res.ok) return []
+    const json = await res.json()
+    const result = json?.chart?.result?.[0]
+    const timestamps: number[] = result?.timestamp ?? []
+    const closes: (number | null)[] = result?.indicators?.quote?.[0]?.close ?? []
+    const out: PricePoint[] = []
+    for (let i = 0; i < timestamps.length; i++) {
+      const c = closes[i]
+      if (typeof c === "number" && Number.isFinite(c)) {
+        out.push({ date: new Date(timestamps[i] * 1000).toISOString().slice(0, 10), close: c })
+      }
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
 export type StockData = {
   symbol: string
   company: string

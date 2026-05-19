@@ -222,13 +222,138 @@ function AddAlertModal({ onClose, onAdd, defaultSymbol = "" }: {
   )
 }
 
+// ─── Tab Optimizador ──────────────────────────────────────────────────────────
+
+type OptWeighted = { weights: number[]; return: number; volatility: number; sharpe: number }
+type OptimizeResult = {
+  symbols: string[]
+  failed: string[]
+  observations: number
+  markowitz: { maxSharpe: OptWeighted; minVol: OptWeighted }
+  hrp: OptWeighted & { diversification: number; var95: number; cvar95: number }
+}
+
+const wpct = (v: number) => `${(v * 100).toFixed(1)}%`
+
+function OptimizerTab({ defaultSymbols, currentWeights }: {
+  defaultSymbols: string[]
+  currentWeights: Record<string, number>
+}) {
+  const [input, setInput]     = useState(defaultSymbols.join(", "))
+  const [result, setResult]   = useState<OptimizeResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState("")
+
+  async function optimize() {
+    const symbols = input.split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean)
+    if (symbols.length < 2) { setError("Introduce al menos 2 símbolos separados por coma"); return }
+    setLoading(true); setError(""); setResult(null)
+    try {
+      const res = await fetch("/api/portfolio/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? "Error al optimizar")
+      setResult(json)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al optimizar")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const strategies = result ? [
+    { key: "Markowitz · Máx Sharpe",       p: result.markowitz.maxSharpe },
+    { key: "Markowitz · Mín Volatilidad",  p: result.markowitz.minVol },
+    { key: "HRP",                          p: result.hrp },
+  ] : []
+
+  return (
+    <div>
+      <p className="text-sm text-gray-400 mb-3">
+        Calcula los pesos óptimos de una cesta de activos: Markowitz (frontera eficiente
+        por simulación) y HRP (Hierarchical Risk Parity). Datos: Yahoo Finance, 1 año.
+      </p>
+      <div className="flex gap-2 mb-4">
+        <input value={input} onChange={e => setInput(e.target.value)}
+          placeholder="AAPL, MSFT, NVDA, GLD, TLT"
+          className="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-600" />
+        <button onClick={optimize} disabled={loading}
+          className="px-4 py-2 rounded bg-blue-700 hover:bg-blue-600 text-white text-sm font-semibold transition-colors disabled:opacity-40">
+          {loading ? "Optimizando..." : "Optimizar"}
+        </button>
+      </div>
+
+      {error && <div className="bg-red-900/20 border border-red-800/30 rounded-xl p-3 text-sm text-red-400 mb-4">{error}</div>}
+
+      {result && (
+        <div className="space-y-5">
+          {result.failed.length > 0 && (
+            <div className="bg-amber-900/20 border border-amber-800/30 rounded-xl p-3 text-xs text-amber-400">
+              ⚠ Sin histórico suficiente, excluidos: {result.failed.join(", ")}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {strategies.map(({ key, p }) => (
+              <div key={key} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-2">{key}</div>
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  <div><div className="text-[10px] text-gray-500">Retorno esp.</div><div className="font-mono text-green-400">{wpct(p.return)}</div></div>
+                  <div><div className="text-[10px] text-gray-500">Volatilidad</div><div className="font-mono text-gray-300">{wpct(p.volatility)}</div></div>
+                  <div><div className="text-[10px] text-gray-500">Sharpe</div><div className="font-mono text-white font-bold">{p.sharpe.toFixed(2)}</div></div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm whitespace-nowrap">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 border-b border-gray-800">
+                  <th className="pb-2 pr-4">Activo</th>
+                  <th className="pb-2 pr-4 text-right">Peso actual</th>
+                  <th className="pb-2 pr-4 text-right">Máx Sharpe</th>
+                  <th className="pb-2 pr-4 text-right">Mín Volatilidad</th>
+                  <th className="pb-2 pr-4 text-right">HRP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.symbols.map((sym, i) => (
+                  <tr key={sym} className="border-b border-gray-800/50">
+                    <td className="py-2 pr-4 font-bold text-white">{sym}</td>
+                    <td className="py-2 pr-4 text-right font-mono text-gray-400">
+                      {currentWeights[sym] != null ? wpct(currentWeights[sym]) : "—"}
+                    </td>
+                    <td className="py-2 pr-4 text-right font-mono text-gray-300">{wpct(result.markowitz.maxSharpe.weights[i])}</td>
+                    <td className="py-2 pr-4 text-right font-mono text-gray-300">{wpct(result.markowitz.minVol.weights[i])}</td>
+                    <td className="py-2 pr-4 text-right font-mono text-blue-300 font-bold">{wpct(result.hrp.weights[i])}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="text-xs text-gray-600">
+            HRP · {result.hrp.diversification.toFixed(2)} posiciones efectivas ·
+            VaR 95% {wpct(result.hrp.var95)} · CVaR 95% {wpct(result.hrp.cvar95)} ·
+            {result.observations} observaciones
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 type PortSortCol  = "symbol" | "qty" | "buy" | "current" | "pnl" | "pnlpct" | "grade" | "buyscore"
 type WatchSortCol = "symbol" | "current" | "target" | "vstarget" | "drop" | "grade" | "buyscore" | "signal"
 
 export default function PortafolioPage() {
-  const [tab, setTab]             = useState<"portfolio" | "watch" | "alerts">("portfolio")
+  const [tab, setTab]             = useState<"portfolio" | "watch" | "alerts" | "optimize">("portfolio")
   const [portfolio, setPortfolio] = useState<PortfolioEntry[]>([])
   const [watchList, setWatchList] = useState<WatchEntry[]>([])
   const [alerts, setAlerts]       = useState<Alert[]>([])
@@ -376,6 +501,21 @@ export default function PortafolioPage() {
   const totalPnl     = totalCurrent - totalCost
   const totalPnlPct  = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0
 
+  // Pesos actuales de la cartera (por valor de mercado) — para el Optimizador.
+  const optimizerSymbols = [...new Set(portfolio.map(e => e.symbol))]
+  const currentWeights = (() => {
+    const bySym: Record<string, number> = {}
+    let tot = 0
+    for (const e of portfolioWithLive) {
+      const v = e.current ?? 0
+      bySym[e.symbol] = (bySym[e.symbol] ?? 0) + v
+      tot += v
+    }
+    const w: Record<string, number> = {}
+    if (tot > 0) for (const s of Object.keys(bySym)) w[s] = bySym[s] / tot
+    return w
+  })()
+
   return (
     <ErrorBoundary fallback="Error al cargar portafolio">
     <main className="min-h-screen bg-gray-950 text-gray-100 p-6">
@@ -419,6 +559,7 @@ export default function PortafolioPage() {
             { key: "portfolio", label: "Portafolio" },
             { key: "watch",     label: `Seguimiento (${watchList.length}/${WATCH_LIMIT})` },
             { key: "alerts",    label: `Alertas${triggeredCount > 0 ? ` (${triggeredCount})` : ""}` },
+            { key: "optimize",  label: "Optimizador" },
           ] as const).map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`px-5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
@@ -796,6 +937,11 @@ export default function PortafolioPage() {
               </div>
             )}
           </div>
+        )}
+
+        {/* ── TAB: OPTIMIZADOR ─────────────────────────────────────────────── */}
+        {tab === "optimize" && (
+          <OptimizerTab defaultSymbols={optimizerSymbols} currentWeights={currentWeights} />
         )}
       </div>
 
