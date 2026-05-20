@@ -1,0 +1,5 @@
+# Archivos locales que no deben subirse al deploy
+rico-suave.zip
+supabase/.temp/
+.next/
+node_modules/
