@@ -12,6 +12,7 @@ import type { ForwardAnalysis } from "@/lib/forward"
 import { runBrain } from "@/lib/brain"
 import type { BrainOutput, MacroContext } from "@/lib/brain"
 import { addPosition, addWatch, addAlert, isWatching, getPortfolio } from "@/lib/portfolio"
+import { LogReturnsChart } from "@/components/LogReturnsChart"
 
 type FullData = StockData & { score: ScoreBreakdown; forward: ForwardAnalysis; brain: BrainOutput }
 
@@ -405,6 +406,14 @@ export default function EmpresaPage() {
 
         {/* Pronóstico AR + GARCH */}
         <ForecastSection symbol={symbol} />
+
+        {/* Retornos logarítmicos históricos */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+          <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+            Retornos logarítmicos · 2 años
+          </h2>
+          <LogReturnsChart symbol={symbol} />
+        </div>
 
         {/* Acciones rápidas */}
         <div className="flex flex-wrap gap-2 mb-6">

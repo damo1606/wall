@@ -5,6 +5,7 @@ import Link from "next/link"
 import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
 import type { ScoreBreakdown } from "@/lib/scoring"
+import { LogReturnsChart } from "@/components/LogReturnsChart"
 
 type Scored = StockData & { score: ScoreBreakdown }
 
@@ -164,6 +165,15 @@ export default function CompararPage() {
                     ))}
                   </tr>
                 ))}
+                {/* Retornos logarítmicos: un mini-chart por columna */}
+                <tr className="border-b border-gray-800 bg-gray-950">
+                  <td className="px-4 py-3 text-xs text-gray-500 tracking-widest font-bold align-top">RETORNOS 2A</td>
+                  {results.map(s => (
+                    <td key={s.symbol} className="px-3 py-3 align-top min-w-[200px]">
+                      <LogReturnsChart symbol={s.symbol} height={140} />
+                    </td>
+                  ))}
+                </tr>
               </tbody>
             </table>
           </div>

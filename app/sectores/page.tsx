@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { LogReturnsChart } from "@/components/LogReturnsChart"
 
 type EtfData = {
   symbol: string; sector: string; name: string
@@ -579,6 +580,14 @@ export default function Sectores() {
                       </span>
                     )}
                   </p>
+
+                  {/* Retornos logarítmicos del ETF sectorial */}
+                  <div className="border-t border-gray-800 pt-3">
+                    <div className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+                      Retornos diarios — {ETF_SYMBOL[active]} (2 años)
+                    </div>
+                    <LogReturnsChart symbol={ETF_SYMBOL[active]} height={170} />
+                  </div>
                 </>
               ) : !loading ? (
                 <div className="text-xs text-gray-600 flex items-center gap-3">
