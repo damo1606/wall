@@ -55,9 +55,28 @@ export const WATCH_LIMIT = 15
 
 // ─── Portafolio ───────────────────────────────────────────────────────────────
 
-export async function getPortfolio(): Promise<PortfolioEntry[]> {
+export type PortfolioMeta = {
+  id: string
+  name: string
+  type: string
+  base_currency: string
+  created_at: string
+  positions: number
+}
+
+/** Lista los portafolios del usuario autenticado (Principal + secundarios). */
+export async function listPortfolios(): Promise<PortfolioMeta[]> {
   try {
-    const res = await fetch("/api/portfolio")
+    const res = await fetch("/api/portfolios")
+    if (!res.ok) return []
+    return await res.json()
+  } catch { return [] }
+}
+
+export async function getPortfolio(portfolioId?: string): Promise<PortfolioEntry[]> {
+  try {
+    const qs = portfolioId ? `?portfolio_id=${encodeURIComponent(portfolioId)}` : ""
+    const res = await fetch(`/api/portfolio${qs}`)
     if (!res.ok) return []
     const rows = await res.json()
     return rows.map((r: any): PortfolioEntry => ({
@@ -72,7 +91,10 @@ export async function getPortfolio(): Promise<PortfolioEntry[]> {
   } catch { return [] }
 }
 
-export async function addPosition(entry: Omit<PortfolioEntry, "id">): Promise<PortfolioEntry> {
+export async function addPosition(
+  entry: Omit<PortfolioEntry, "id">,
+  portfolioId?: string,
+): Promise<PortfolioEntry> {
   const res = await fetch("/api/portfolio", {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
@@ -83,14 +105,35 @@ export async function addPosition(entry: Omit<PortfolioEntry, "id">): Promise<Po
       buy_price: entry.buyPrice,
       buy_date:  entry.buyDate || null,
       notes:     entry.notes,
+      portfolio_id: portfolioId,
     }),
   })
   const row = await res.json()
   return { id: row.id, symbol: row.symbol, company: row.company ?? "", qty: Number(row.qty), buyPrice: Number(row.buy_price), buyDate: row.buy_date ?? "", notes: row.notes }
 }
 
-export async function removePosition(id: string): Promise<void> {
-  await fetch(`/api/portfolio?id=${id}`, { method: "DELETE" })
+export async function removePosition(id: string, portfolioId?: string): Promise<void> {
+  const qs = `?id=${encodeURIComponent(id)}` + (portfolioId ? `&portfolio_id=${encodeURIComponent(portfolioId)}` : "")
+  await fetch(`/api/portfolio${qs}`, { method: "DELETE" })
+}
+
+/**
+ * Helper: fetch con manejo de errores centralizado.
+ */
+async function fetchPortfolioApi(
+  method: string,
+  body: Record<string, unknown>,
+  errorMsg: string,
+): Promise<void> {
+  const res = await fetch("/api/portfolio", {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error(j.error ?? errorMsg)
+  }
 }
 
 /**
@@ -100,21 +143,15 @@ export async function removePosition(id: string): Promise<void> {
 export async function updatePosition(
   id: string,
   patch: { qty?: number; buyPrice?: number; buyDate?: string; symbol?: string },
+  portfolioId?: string,
 ): Promise<void> {
   const body: Record<string, unknown> = { id }
   if (patch.qty != null)      body.qty = patch.qty
   if (patch.buyPrice != null) body.buy_price = patch.buyPrice
   if (patch.buyDate)          body.buy_date = patch.buyDate
   if (patch.symbol)           body.symbol = patch.symbol
-  const res = await fetch("/api/portfolio", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) {
-    const j = await res.json().catch(() => ({}))
-    throw new Error(j.error ?? "No se pudo actualizar la posición")
-  }
+  if (portfolioId)            body.portfolio_id = portfolioId
+  await fetchPortfolioApi("PATCH", body, "No se pudo actualizar la posición")
 }
 
 /**
@@ -123,25 +160,21 @@ export async function updatePosition(
  */
 export async function sellPosition(
   symbol: string,
-  qty: number,
-  price: number,
-  date: string,
+  order: { qty: number; price: number; date: string },
+  portfolioId?: string,
 ): Promise<void> {
-  const res = await fetch("/api/portfolio", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  await fetchPortfolioApi(
+    "POST",
+    {
       symbol,
-      qty,
-      buy_price: price,
-      buy_date: date,
+      qty: order.qty,
+      buy_price: order.price,
+      buy_date: order.date,
       tx_type: "sell",
-    }),
-  })
-  if (!res.ok) {
-    const j = await res.json().catch(() => ({}))
-    throw new Error(j.error ?? "No se pudo registrar la venta")
-  }
+      portfolio_id: portfolioId,
+    },
+    "No se pudo registrar la venta",
+  )
 }
 
 // ─── Lista de Seguimiento ─────────────────────────────────────────────────────

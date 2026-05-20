@@ -44,12 +44,33 @@ async function resolveSymbolId(ticker: string): Promise<string | null> {
   return data?.id ?? null
 }
 
-export async function GET() {
+/**
+ * Si `explicitId` está presente, valida que pertenezca al usuario y la devuelve.
+ * Si no, cae al portafolio por defecto (Principal) para preservar el contrato previo.
+ * Devuelve null sólo cuando explicitId es inválido (caller debe responder 404).
+ */
+async function resolvePortfolioId(
+  userId: string,
+  explicitId: string | null | undefined,
+): Promise<string | null> {
+  if (explicitId) {
+    const { data } = await supabaseServer()
+      .from("portfolios")
+      .select("id")
+      .eq("id", explicitId)
+      .eq("user_id", userId)
+      .maybeSingle()
+    return data?.id ?? null
+  }
+  return getOrCreateDefaultPortfolio(userId)
+}
+
+export async function GET(req: NextRequest) {
   const userId = await getUserId()
   if (!userId) return NextResponse.json({ error: "No autenticado" }, { status: 401 })
 
-  const portfolioId = await getOrCreateDefaultPortfolio(userId)
-  if (!portfolioId) return NextResponse.json({ error: "No se pudo obtener portfolio" }, { status: 500 })
+  const portfolioId = await resolvePortfolioId(userId, req.nextUrl.searchParams.get("portfolio_id"))
+  if (!portfolioId) return NextResponse.json({ error: "Portafolio no encontrado" }, { status: 404 })
 
   const { data, error } = await supabaseServer()
     .from("positions")
@@ -83,8 +104,8 @@ export async function POST(req: NextRequest) {
   if (!symbol || qty == null || buy_price == null)
     return NextResponse.json({ error: "symbol, qty y buy_price son requeridos" }, { status: 400 })
 
-  const portfolioId = await getOrCreateDefaultPortfolio(userId)
-  if (!portfolioId) return NextResponse.json({ error: "No se pudo obtener portfolio" }, { status: 500 })
+  const portfolioId = await resolvePortfolioId(userId, body.portfolio_id)
+  if (!portfolioId) return NextResponse.json({ error: "Portafolio no encontrado" }, { status: 404 })
 
   const symbolId = await resolveSymbolId(symbol)
   if (!symbolId) return NextResponse.json({ error: `Símbolo ${symbol} no existe` }, { status: 404 })
@@ -122,8 +143,8 @@ export async function PATCH(req: NextRequest) {
   const { id, qty, buy_price, buy_date, symbol } = body
   if (!id) return NextResponse.json({ error: "id requerido" }, { status: 400 })
 
-  const portfolioId = await getOrCreateDefaultPortfolio(userId)
-  if (!portfolioId) return NextResponse.json({ error: "No se pudo obtener portfolio" }, { status: 500 })
+  const portfolioId = await resolvePortfolioId(userId, body.portfolio_id)
+  if (!portfolioId) return NextResponse.json({ error: "Portafolio no encontrado" }, { status: 404 })
 
   const update: {
     qty?: number; avg_cost?: number; opened_at?: string
@@ -167,8 +188,8 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id")
   if (!id) return NextResponse.json({ error: "id requerido" }, { status: 400 })
 
-  const portfolioId = await getOrCreateDefaultPortfolio(userId)
-  if (!portfolioId) return NextResponse.json({ error: "No se pudo obtener portfolio" }, { status: 500 })
+  const portfolioId = await resolvePortfolioId(userId, req.nextUrl.searchParams.get("portfolio_id"))
+  if (!portfolioId) return NextResponse.json({ error: "Portafolio no encontrado" }, { status: 404 })
 
   const { error } = await supabaseServer()
     .from("positions")

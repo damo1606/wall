@@ -7,6 +7,7 @@ import { scoreStock } from "@/lib/scoring"
 import type { ScoreBreakdown } from "@/lib/scoring"
 import {
   getPortfolio, addPosition, removePosition, updatePosition, sellPosition,
+  listPortfolios, type PortfolioMeta,
   getWatchEntries, addWatch, removeWatch,
   getAlerts, addAlert, removeAlert, toggleAlertActive, markTriggered, resetAlert, checkAlerts,
   alertTypeLabel, alertThresholdSuffix, GRADE_ORDER, WATCH_LIMIT,
@@ -488,6 +489,8 @@ export default function PortafolioPage() {
   const [isLoggedIn, setIsLoggedIn]   = useState<boolean | null>(null)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [sellTarget, setSellTarget]   = useState<{ id: string; symbol: string; qty: number; price: number } | null>(null)
+  const [portfolios, setPortfolios]   = useState<PortfolioMeta[]>([])
+  const [selectedPortfolioId, setSelectedPortfolioId] = useState<string | null>(null)
 
   function handlePortSort(col: PortSortCol) {
     if (portSort === col) setPortDir(d => d === "desc" ? "asc" : "desc")
@@ -501,24 +504,39 @@ export default function PortafolioPage() {
     return <span className="text-[10px]">{active ? (dir === "desc" ? "▼" : "▲") : "↕"}</span>
   }
 
-  async function reload() {
-    const [p, w, a] = await Promise.all([getPortfolio(), getWatchEntries(), getAlerts()])
+  async function reload(pid?: string | null) {
+    const [p, w, a] = await Promise.all([
+      getPortfolio(pid ?? selectedPortfolioId ?? undefined),
+      getWatchEntries(),
+      getAlerts(),
+    ])
     setPortfolio(p)
     setWatchList(w)
     setAlerts(a)
   }
 
-  // Cargar desde Supabase al montar
+  // Cargar lista de portafolios + watch/alerts al montar
   useEffect(() => {
-    fetch("/api/portfolio").then(r => {
+    fetch("/api/portfolios").then(async r => {
       setIsLoggedIn(r.status !== 401)
-      if (r.status !== 401) reload()
+      if (r.status === 401) return
+      const list: PortfolioMeta[] = await r.json()
+      setPortfolios(list)
+      // Por defecto: el más reciente (último creado) que probablemente es lo que el usuario quiere ver.
+      const def = list[list.length - 1]?.id ?? null
+      setSelectedPortfolioId(def)
     }).catch(() => setIsLoggedIn(false))
     try {
       const saved = JSON.parse(localStorage.getItem("wall_watchlist_state") ?? "{}")
       setSavedSignals(saved)
     } catch {}
   }, [])
+
+  // Recargar posiciones cuando cambia el portafolio seleccionado
+  useEffect(() => {
+    if (!selectedPortfolioId) return
+    reload(selectedPortfolioId)
+  }, [selectedPortfolioId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Todos los símbolos únicos que necesitan datos live
   const allSymbols = Array.from(new Set([
@@ -645,7 +663,21 @@ export default function PortafolioPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold text-white">Portafolio</h1>
-            <p className="text-gray-400 mt-1 text-sm">Posiciones · Seguimiento · Alertas</p>
+            {portfolios.length > 1 ? (
+              <select
+                value={selectedPortfolioId ?? ""}
+                onChange={e => setSelectedPortfolioId(e.target.value)}
+                className="mt-2 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-white cursor-pointer"
+              >
+                {portfolios.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.positions} {p.positions === 1 ? "ticker" : "tickers"}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-gray-400 mt-1 text-sm">Posiciones · Seguimiento · Alertas</p>
+            )}
           </div>
           <div className="flex gap-2">
             <button
@@ -695,6 +727,20 @@ export default function PortafolioPage() {
         {/* ── TAB: PORTAFOLIO ───────────────────────────────────────────────── */}
         {tab === "portfolio" && (
           <div>
+            {/* Cabecera SORE-style: nombre del portafolio + nº de tickers */}
+            {(() => {
+              const cp = portfolios.find(p => p.id === selectedPortfolioId)
+              if (!cp) return null
+              return (
+                <h2 className="text-2xl font-bold text-white mb-3">
+                  {cp.name}
+                  <span className="text-gray-400 text-sm font-normal ml-2">
+                    · {cp.positions} {cp.positions === 1 ? "ticker" : "tickers"}
+                  </span>
+                </h2>
+              )
+            })()}
+
             {/* Resumen */}
             {portfolio.length > 0 && (
               <div className="grid grid-cols-3 gap-4 mb-6">
@@ -775,11 +821,11 @@ export default function PortafolioPage() {
                         </td>
                         <td className="py-3 pr-4 text-right font-mono text-gray-300">
                           <EditableCell value={e.qty} type="number"
-                            onSave={async v => { await updatePosition(e.id, { qty: Number(v) }); setPortfolio(await getPortfolio()) }} />
+                            onSave={async v => { await updatePosition(e.id, { qty: Number(v) }, selectedPortfolioId ?? undefined); setPortfolio(await getPortfolio(selectedPortfolioId ?? undefined)) }} />
                         </td>
                         <td className="py-3 pr-4 text-right font-mono text-gray-300">
                           <EditableCell value={e.buyPrice} type="number" display={`$${e.buyPrice.toFixed(2)}`}
-                            onSave={async v => { await updatePosition(e.id, { buyPrice: Number(v) }); setPortfolio(await getPortfolio()) }} />
+                            onSave={async v => { await updatePosition(e.id, { buyPrice: Number(v) }, selectedPortfolioId ?? undefined); setPortfolio(await getPortfolio(selectedPortfolioId ?? undefined)) }} />
                         </td>
                         <td className="py-3 pr-4 text-right font-mono">
                           {loadingSymbols.has(e.symbol) ? <span className="text-gray-600">…</span> : usd(e.live?.currentPrice ?? 0)}
@@ -805,7 +851,7 @@ export default function PortafolioPage() {
                         </td>
                         <td className="py-3 pr-4 text-xs text-gray-600">
                           <EditableCell value={e.buyDate} type="date"
-                            onSave={async v => { await updatePosition(e.id, { buyDate: v }); setPortfolio(await getPortfolio()) }} />
+                            onSave={async v => { await updatePosition(e.id, { buyDate: v }, selectedPortfolioId ?? undefined); setPortfolio(await getPortfolio(selectedPortfolioId ?? undefined)) }} />
                         </td>
                         <td className="py-3">
                           <div className="flex items-center gap-2">
@@ -820,8 +866,8 @@ export default function PortafolioPage() {
                                 const next = prompt(`Cambiar ticker de ${e.symbol} por:`, e.symbol)
                                 if (!next || next.trim().toUpperCase() === e.symbol) return
                                 try {
-                                  await updatePosition(e.id, { symbol: next.trim().toUpperCase() })
-                                  setPortfolio(await getPortfolio())
+                                  await updatePosition(e.id, { symbol: next.trim().toUpperCase() }, selectedPortfolioId ?? undefined)
+                                  setPortfolio(await getPortfolio(selectedPortfolioId ?? undefined))
                                 } catch (err) {
                                   alert((err as Error).message || "Error al cambiar ticker")
                                 }
@@ -833,7 +879,7 @@ export default function PortafolioPage() {
                               disabled={e.qty <= 0}
                               title="Vender (registra transacción de venta)"
                               className="text-gray-700 hover:text-orange-400 transition-colors text-xs disabled:opacity-30 disabled:hover:text-gray-700">▾</button>
-                            <button onClick={async () => { await removePosition(e.id); setPortfolio(await getPortfolio()) }}
+                            <button onClick={async () => { await removePosition(e.id, selectedPortfolioId ?? undefined); setPortfolio(await getPortfolio(selectedPortfolioId ?? undefined)) }}
                               title="Borrar posición"
                               className="text-gray-700 hover:text-red-400 transition-colors text-lg leading-none">✕</button>
                           </div>
@@ -1097,7 +1143,7 @@ export default function PortafolioPage() {
       {showAddPos && (
         <AddPositionModal
           onClose={() => setShowAddPos(false)}
-          onAdd={async entry => { await addPosition(entry); setPortfolio(await getPortfolio()); refreshData([entry.symbol]) }}
+          onAdd={async entry => { await addPosition(entry, selectedPortfolioId ?? undefined); setPortfolio(await getPortfolio(selectedPortfolioId ?? undefined)); refreshData([entry.symbol]) }}
         />
       )}
       {showAddAlert && (
@@ -1113,8 +1159,8 @@ export default function PortafolioPage() {
           maxQty={sellTarget.qty}
           onClose={() => setSellTarget(null)}
           onConfirm={async (q, p, d) => {
-            await sellPosition(sellTarget.symbol, q, p, d)
-            setPortfolio(await getPortfolio())
+            await sellPosition(sellTarget.symbol, { qty: q, price: p, date: d }, selectedPortfolioId ?? undefined)
+            setPortfolio(await getPortfolio(selectedPortfolioId ?? undefined))
           }}
         />
       )}
