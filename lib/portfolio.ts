@@ -93,6 +93,57 @@ export async function removePosition(id: string): Promise<void> {
   await fetch(`/api/portfolio?id=${id}`, { method: "DELETE" })
 }
 
+/**
+ * Edita una posición DIRECTAMENTE (corrección manual, sin transacción).
+ * Pasa solo los campos que cambian: qty, buyPrice, buyDate, symbol.
+ */
+export async function updatePosition(
+  id: string,
+  patch: { qty?: number; buyPrice?: number; buyDate?: string; symbol?: string },
+): Promise<void> {
+  const body: Record<string, unknown> = { id }
+  if (patch.qty != null)      body.qty = patch.qty
+  if (patch.buyPrice != null) body.buy_price = patch.buyPrice
+  if (patch.buyDate)          body.buy_date = patch.buyDate
+  if (patch.symbol)           body.symbol = patch.symbol
+  const res = await fetch("/api/portfolio", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error(j.error ?? "No se pudo actualizar la posición")
+  }
+}
+
+/**
+ * Registra una VENTA (tx_type='sell'). El trigger reduce qty en la posición;
+ * si llega a 0 la fila persiste con qty=0 (no se borra automáticamente).
+ */
+export async function sellPosition(
+  symbol: string,
+  qty: number,
+  price: number,
+  date: string,
+): Promise<void> {
+  const res = await fetch("/api/portfolio", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      symbol,
+      qty,
+      buy_price: price,
+      buy_date: date,
+      tx_type: "sell",
+    }),
+  })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error(j.error ?? "No se pudo registrar la venta")
+  }
+}
+
 // ─── Lista de Seguimiento ─────────────────────────────────────────────────────
 
 export async function getWatchEntries(): Promise<WatchEntry[]> {

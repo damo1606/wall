@@ -6,7 +6,7 @@ import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
 import type { ScoreBreakdown } from "@/lib/scoring"
 import {
-  getPortfolio, addPosition, removePosition,
+  getPortfolio, addPosition, removePosition, updatePosition, sellPosition,
   getWatchEntries, addWatch, removeWatch,
   getAlerts, addAlert, removeAlert, toggleAlertActive, markTriggered, resetAlert, checkAlerts,
   alertTypeLabel, alertThresholdSuffix, GRADE_ORDER, WATCH_LIMIT,
@@ -347,6 +347,125 @@ function OptimizerTab({ defaultSymbols, currentWeights }: {
   )
 }
 
+// ─── Edición inline ──────────────────────────────────────────────────────────
+
+function EditableCell({
+  value, type = "text", display, onSave, className = "",
+}: {
+  value: string | number
+  type?: "text" | "number" | "date"
+  display?: string
+  onSave: (next: string) => Promise<void>
+  className?: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState(String(value))
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { setVal(String(value)) }, [value])
+
+  if (!editing) {
+    return (
+      <span
+        onClick={() => setEditing(true)}
+        className={`cursor-pointer border-b border-dashed border-transparent hover:border-gray-600 ${className}`}
+        title="Click para editar"
+      >
+        {display ?? String(value)}
+      </span>
+    )
+  }
+
+  async function commit() {
+    if (val === String(value)) { setEditing(false); return }
+    setSaving(true)
+    try { await onSave(val); setEditing(false) }
+    catch (e) { alert((e as Error).message || "Error al guardar"); setVal(String(value)); setEditing(false) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <input
+      autoFocus
+      type={type}
+      value={val}
+      onChange={e => setVal(e.target.value)}
+      onBlur={() => { setEditing(false); setVal(String(value)) }}
+      onKeyDown={e => {
+        if (e.key === "Enter") commit()
+        else if (e.key === "Escape") { setEditing(false); setVal(String(value)) }
+      }}
+      disabled={saving}
+      className="bg-gray-700 border border-blue-500 text-white px-1.5 py-0.5 rounded text-sm w-full font-mono"
+    />
+  )
+}
+
+// ─── Modal "Vender" ──────────────────────────────────────────────────────────
+
+function SellModal({
+  symbol, currentPrice, maxQty, onClose, onConfirm,
+}: {
+  symbol: string
+  currentPrice: number
+  maxQty: number
+  onClose: () => void
+  onConfirm: (qty: number, price: number, date: string) => Promise<void>
+}) {
+  const [qty, setQty]     = useState(String(maxQty))
+  const [price, setPrice] = useState(currentPrice ? currentPrice.toFixed(2) : "")
+  const [date, setDate]   = useState(new Date().toISOString().slice(0, 10))
+  const [saving, setSaving] = useState(false)
+  const [err, setErr]     = useState("")
+
+  async function submit() {
+    const q = Number(qty)
+    const p = Number(price)
+    if (!(q > 0))   { setErr("Cantidad inválida"); return }
+    if (!(p >= 0))  { setErr("Precio inválido"); return }
+    setSaving(true); setErr("")
+    try { await onConfirm(q, p, date); onClose() }
+    catch (e) { setErr((e as Error).message || "Error al vender") }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm">
+        <h2 className="text-white font-bold text-lg mb-4">Vender {symbol}</h2>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Cantidad (máx {maxQty})</label>
+            <input type="number" min="0" max={maxQty} step="any" value={qty} onChange={e => setQty(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Precio de venta ($)</label>
+            <input type="number" min="0" step="any" value={price} onChange={e => setPrice(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Fecha</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white" />
+          </div>
+          {err && <div className="text-red-400 text-xs">{err}</div>}
+        </div>
+        <div className="flex gap-2 mt-5">
+          <button onClick={onClose} disabled={saving}
+            className="flex-1 py-2 rounded bg-gray-800 text-gray-400 hover:text-gray-200 text-sm transition-colors">
+            Cancelar
+          </button>
+          <button onClick={submit} disabled={saving}
+            className="flex-1 py-2 rounded bg-orange-700 hover:bg-orange-600 text-white text-sm font-semibold disabled:opacity-50">
+            {saving ? "Vendiendo..." : "Confirmar venta"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 type PortSortCol  = "symbol" | "qty" | "buy" | "current" | "pnl" | "pnlpct" | "grade" | "buyscore"
@@ -368,6 +487,7 @@ export default function PortafolioPage() {
   const [savedSignals, setSavedSignals] = useState<Record<string, string>>({})
   const [isLoggedIn, setIsLoggedIn]   = useState<boolean | null>(null)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [sellTarget, setSellTarget]   = useState<{ id: string; symbol: string; qty: number; price: number } | null>(null)
 
   function handlePortSort(col: PortSortCol) {
     if (portSort === col) setPortDir(d => d === "desc" ? "asc" : "desc")
@@ -653,8 +773,14 @@ export default function PortafolioPage() {
                           </Link>
                           {e.notes && <div className="text-[10px] text-gray-700 mt-0.5 truncate max-w-[150px]">{e.notes}</div>}
                         </td>
-                        <td className="py-3 pr-4 text-right font-mono text-gray-300">{e.qty}</td>
-                        <td className="py-3 pr-4 text-right font-mono text-gray-300">${e.buyPrice.toFixed(2)}</td>
+                        <td className="py-3 pr-4 text-right font-mono text-gray-300">
+                          <EditableCell value={e.qty} type="number"
+                            onSave={async v => { await updatePosition(e.id, { qty: Number(v) }); setPortfolio(await getPortfolio()) }} />
+                        </td>
+                        <td className="py-3 pr-4 text-right font-mono text-gray-300">
+                          <EditableCell value={e.buyPrice} type="number" display={`$${e.buyPrice.toFixed(2)}`}
+                            onSave={async v => { await updatePosition(e.id, { buyPrice: Number(v) }); setPortfolio(await getPortfolio()) }} />
+                        </td>
                         <td className="py-3 pr-4 text-right font-mono">
                           {loadingSymbols.has(e.symbol) ? <span className="text-gray-600">…</span> : usd(e.live?.currentPrice ?? 0)}
                         </td>
@@ -677,7 +803,10 @@ export default function PortafolioPage() {
                               : <SignalBadge signal={e.live.score.signal} />
                           ) : <span className="text-gray-700 text-xs">—</span>}
                         </td>
-                        <td className="py-3 pr-4 text-xs text-gray-600">{e.buyDate}</td>
+                        <td className="py-3 pr-4 text-xs text-gray-600">
+                          <EditableCell value={e.buyDate} type="date"
+                            onSave={async v => { await updatePosition(e.id, { buyDate: v }); setPortfolio(await getPortfolio()) }} />
+                        </td>
                         <td className="py-3">
                           <div className="flex items-center gap-2">
                             {e.live && (
@@ -686,7 +815,26 @@ export default function PortafolioPage() {
                                 {expandedRow === e.id ? "▲" : "▼"}
                               </button>
                             )}
+                            <button
+                              onClick={async () => {
+                                const next = prompt(`Cambiar ticker de ${e.symbol} por:`, e.symbol)
+                                if (!next || next.trim().toUpperCase() === e.symbol) return
+                                try {
+                                  await updatePosition(e.id, { symbol: next.trim().toUpperCase() })
+                                  setPortfolio(await getPortfolio())
+                                } catch (err) {
+                                  alert((err as Error).message || "Error al cambiar ticker")
+                                }
+                              }}
+                              title="Cambiar ticker"
+                              className="text-gray-700 hover:text-blue-400 transition-colors text-xs">✎</button>
+                            <button
+                              onClick={() => e.qty > 0 && setSellTarget({ id: e.id, symbol: e.symbol, qty: e.qty, price: e.live?.currentPrice ?? 0 })}
+                              disabled={e.qty <= 0}
+                              title="Vender (registra transacción de venta)"
+                              className="text-gray-700 hover:text-orange-400 transition-colors text-xs disabled:opacity-30 disabled:hover:text-gray-700">▾</button>
                             <button onClick={async () => { await removePosition(e.id); setPortfolio(await getPortfolio()) }}
+                              title="Borrar posición"
                               className="text-gray-700 hover:text-red-400 transition-colors text-lg leading-none">✕</button>
                           </div>
                         </td>
@@ -956,6 +1104,18 @@ export default function PortafolioPage() {
         <AddAlertModal
           onClose={() => setShowAddAlert(false)}
           onAdd={async a => { await addAlert(a); setAlerts(await getAlerts()) }}
+        />
+      )}
+      {sellTarget && (
+        <SellModal
+          symbol={sellTarget.symbol}
+          currentPrice={sellTarget.price}
+          maxQty={sellTarget.qty}
+          onClose={() => setSellTarget(null)}
+          onConfirm={async (q, p, d) => {
+            await sellPosition(sellTarget.symbol, q, p, d)
+            setPortfolio(await getPortfolio())
+          }}
         />
       )}
     </main>
