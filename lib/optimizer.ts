@@ -4,6 +4,20 @@
 
 const TRADING_DAYS = 252
 
+// PRNG sembrado (Mulberry32). Reemplaza Math.random() en el Monte Carlo para
+// que el optimizador devuelva los mismos pesos ante la misma entrada — rico-suave
+// no semilla su np.random.random y eso lo vuelve no reproducible.
+function mulberry32(seed: number): () => number {
+  let s = seed >>> 0
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0
+    let t = s
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
 // Retornos logarítmicos de una serie de cierres.
 export function logReturns(closes: number[]): number[] {
   const r: number[] = []
@@ -55,11 +69,15 @@ export type OptimizedPortfolio = {
  * Markowitz por simulación Monte Carlo (igual que rico-suave): genera
  * `nPortfolios` carteras de pesos aleatorios y devuelve la de máximo Sharpe
  * y la de mínima volatilidad.
+ *
+ * `seed` controla el PRNG → la misma entrada produce los mismos pesos.
+ * (rico-suave usa np.random.random sin semilla y eso lo vuelve no reproducible).
  */
 export function markowitz(
   returns: number[][],
   nPortfolios = 2000,
   riskFreeRate = 0,
+  seed = 42,
 ): { maxSharpe: OptimizedPortfolio; minVol: OptimizedPortfolio } {
   const n = returns.length
   const mu = returns.map(r => mean(r) * TRADING_DAYS)
@@ -68,8 +86,9 @@ export function markowitz(
   let best: OptimizedPortfolio | null = null
   let minV: OptimizedPortfolio | null = null
 
+  const rand = mulberry32(seed)
   for (let p = 0; p < nPortfolios; p++) {
-    const w = Array.from({ length: n }, () => Math.random())
+    const w = Array.from({ length: n }, () => rand())
     const sum = w.reduce((a, b) => a + b, 0)
     if (sum === 0) continue
     for (let i = 0; i < n; i++) w[i] /= sum
@@ -126,6 +145,12 @@ function clusterVar(cv: number[][], items: number[]): number {
 /**
  * HRP — Hierarchical Risk Parity. Devuelve los pesos alineados al orden de
  * `returns`. Reparte el riesgo por bisección recursiva del orden cuasi-diagonal.
+ *
+ * Nota: la cuasi-diagonalización aquí es una cadena greedy de vecino más cercano
+ * (heredada de rico-suave), no la cuasi-diagonalización canónica de López de
+ * Prado que parte de un clustering jerárquico (scipy.linkage). Es una
+ * simplificación funcional — para HRP canónico habría que sustituir
+ * `quasiDiagOrder` por un linkage + reorder jerárquico.
  */
 export function hrp(returns: number[][]): number[] {
   const n = returns.length
