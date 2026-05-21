@@ -91,8 +91,9 @@ export function MacroInputGrid({ inputs, onChange, fredActuals }: Props) {
                         type="text"
                         value={cell.consensus}
                         onChange={e => onChange(c, ind, 'consensus', e.target.value)}
-                        placeholder="—"
-                        className="w-12 bg-gray-800/60 border border-gray-700/50 rounded px-1 py-0.5 text-gray-400 text-center focus:outline-none focus:border-gray-500"
+                        placeholder="manual"
+                        title="Consensus solo manual — pega el dato de Investing.com / Bloomberg / Forexfactory"
+                        className="w-12 bg-gray-800/60 border border-gray-700/50 rounded px-1 py-0.5 text-gray-400 text-center focus:outline-none focus:border-gray-500 placeholder:text-gray-700 placeholder:text-[9px]"
                       />
                     </td>
                   </>
@@ -103,6 +104,10 @@ export function MacroInputGrid({ inputs, onChange, fredActuals }: Props) {
         </tbody>
       </table>
       <p className="text-gray-700 text-xs mt-2">Unemployment: actual &gt; consenso = negativo (invertido)</p>
+      <p className="text-gray-700 text-[10px] mt-1">
+        PMI: FRED no aloja la PMI canónica de S&amp;P Global. Se usa el OECD Business/Consumer Sentiment como
+        <strong className="text-gray-500"> proxy direccional</strong> (escala % balance, no comparable 1:1 con PMI 50). Consensus siempre es manual.
+      </p>
     </div>
   )
 }

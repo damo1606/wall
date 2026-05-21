@@ -4,11 +4,19 @@ import type { Currency, MacroIndicator } from '@/types/forex'
 type SeriesCfg = { id: string; units: 'lin' | 'pc1' }
 type FredActuals = Partial<Record<Currency, Partial<Record<MacroIndicator, string>>>>
 
+// Notas sobre los IDs añadidos (verificados contra FRED el 2026-05):
+//   PMI: FRED no aloja la PMI canónica de S&P Global/ISM. Se usa la
+//   Business Sentiment Composite (BSCICP02...) de la OECD como proxy
+//   direccional. Donde BSCI no existe, se cae a Consumer Sentiment
+//   Composite (CSCICP02...). Ambas en "% balance" — útil para dirección,
+//   no comparable 1:1 con la PMI 0-100. Etiquetar en UI como tal.
+//   CAD y NZD no tienen ni BSCI ni CSCI activos en FRED → quedan manual.
 const FRED_MAP: Partial<Record<Currency, Partial<Record<MacroIndicator, SeriesCfg>>>> = {
   USD: {
     CPI:          { id: 'CPIAUCSL',        units: 'pc1' },
     GDP:          { id: 'A191RL1Q225SBEA', units: 'lin' },
     Unemployment: { id: 'UNRATE',          units: 'lin' },
+    PMI:          { id: 'BSCICP02USM460S', units: 'lin' },   // proxy: OECD Business Sentiment
     RetailSales:  { id: 'RSXFS',           units: 'pc1' },
     InterestRate: { id: 'FEDFUNDS',        units: 'lin' },
     TradeBalance: { id: 'BOPGSTB',         units: 'lin' },
@@ -17,24 +25,33 @@ const FRED_MAP: Partial<Record<Currency, Partial<Record<MacroIndicator, SeriesCf
     CPI:          { id: 'CPALTT01EZM659N',    units: 'lin' },
     GDP:          { id: 'CLVMNACSCAB1GQEZ19', units: 'pc1' },
     Unemployment: { id: 'LRHUTTTTEZM156S',    units: 'lin' },
+    PMI:          { id: 'BSCICP02EZM460S',    units: 'lin' },   // proxy
     InterestRate: { id: 'ECBDFR',             units: 'lin' },
   },
   GBP: {
     CPI:          { id: 'CPGBM659N',        units: 'lin' },
     GDP:          { id: 'CLVMNACSCAB1GQGB', units: 'pc1' },
     Unemployment: { id: 'LRHUTTTTGBM156S',  units: 'lin' },
+    PMI:          { id: 'BSCICP02GBM460S',  units: 'lin' },   // proxy
+    RetailSales:  { id: 'GBRSLRTTO01GYSAM', units: 'lin' },   // YoY %
     InterestRate: { id: 'BOERUKM',          units: 'lin' },
+    TradeBalance: { id: 'XTNTVA01GBM664S',  units: 'lin' },   // £
   },
   JPY: {
     CPI:          { id: 'JPNCPIALLMINMEI',  units: 'lin' },
     GDP:          { id: 'JPNRGDPEXP',       units: 'pc1' },
     Unemployment: { id: 'LRHUTTTTJPM156S',  units: 'lin' },
+    PMI:          { id: 'CSCICP02JPM460S',  units: 'lin' },   // proxy: Consumer Sentiment
+    RetailSales:  { id: 'JPNSLRTTO01GPSAM', units: 'lin' },   // MoM %
     InterestRate: { id: 'IRSTJPM193N',      units: 'lin' },
+    TradeBalance: { id: 'XTNTVA01JPM664S',  units: 'lin' },   // ¥
   },
   CHF: {
     CPI:          { id: 'CHECPIALLMINMEI',  units: 'lin' },
     GDP:          { id: 'CHEGDPNQDSMEI',    units: 'pc1' },
     Unemployment: { id: 'LRHUTTTTCHM156S',  units: 'lin' },
+    PMI:          { id: 'BSCICP02CHM460S',  units: 'lin' },   // proxy
+    RetailSales:  { id: 'CHESLRTTO01GYSAM', units: 'lin' },   // YoY %
     InterestRate: { id: 'IRSTCB01CHM156N',  units: 'lin' },
   },
   CAD: {
@@ -42,12 +59,15 @@ const FRED_MAP: Partial<Record<Currency, Partial<Record<MacroIndicator, SeriesCf
     GDP:          { id: 'CANGDPNQDSMEI',    units: 'pc1' },
     Unemployment: { id: 'LRHUTTTTCAM156S',  units: 'lin' },
     InterestRate: { id: 'IRSTCB01CAM156N',  units: 'lin' },
+    TradeBalance: { id: 'XTNTVA01CAM664S',  units: 'lin' },   // C$
   },
   AUD: {
     CPI:          { id: 'CPALTT01AUM659N',  units: 'lin' },
     GDP:          { id: 'AUSGDPNQDSMEI',    units: 'pc1' },
     Unemployment: { id: 'LRHUTTTTAUM156S',  units: 'lin' },
+    PMI:          { id: 'CSCICP02AUM460S',  units: 'lin' },   // proxy
     InterestRate: { id: 'IRSTCB01AUM156N',  units: 'lin' },
+    TradeBalance: { id: 'XTNTVA01AUM664S',  units: 'lin' },   // A$
   },
   NZD: {
     CPI:          { id: 'CPALTT01NZM659N',  units: 'lin' },
