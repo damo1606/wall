@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect } from 'react'
-import type { Currency, MacroIndicator, MacroInput, COTData, CurrencyScore, PairScore, PairForecast } from '@/types/forex'
+import type { Currency, MacroIndicator, MacroInput, COTData, CurrencyScore, PairScore, PairForecast, PairMarkov } from '@/types/forex'
 import { emptyInputs } from '@/lib/forex'
 import { KPIPills } from '@/components/MacroFX/KPIPills'
 import { CurrencyRadar } from '@/components/MacroFX/CurrencyRadar'
@@ -22,6 +22,9 @@ interface ComputedState {
   scores: Record<Currency, CurrencyScore>
   pairScores: PairScore[]
 }
+
+// Payload por par del motor estadístico (/api/macro-fx/forecast).
+type PairStats = PairForecast & { markov: PairMarkov | null }
 
 function loadFromStorage(): { inputs: MacroInput; cotData: COTData } | null {
   try {
@@ -62,7 +65,7 @@ export default function MacroFXPage() {
   const [threshold, setThreshold] = useState(6)
   const [loading, setLoading] = useState(false)
   const [fredActuals, setFredActuals] = useState<FredActuals>({})
-  const [forecasts, setForecasts] = useState<Record<string, PairForecast | null>>({})
+  const [forecasts, setForecasts] = useState<Record<string, PairStats | null>>({})
 
   useEffect(() => {
     const saved = loadFromStorage()
@@ -83,23 +86,26 @@ export default function MacroFXPage() {
       })
       .catch(() => {})
 
-    // Pronóstico ARIMA/GARCH de los 26 pares (dimensión 3, independiente de macro)
+    // Motor estadístico de los 26 pares: pronóstico ARIMA/GARCH + régimen Markov
+    // (dimensiones 3 y 4, independientes de macro).
     fetch('/api/macro-fx/forecast')
       .then(r => r.ok ? r.json() : null)
-      .then((fc: Record<string, PairForecast | null> | null) => { if (fc) setForecasts(fc) })
+      .then((fc: Record<string, PairStats | null> | null) => { if (fc) setForecasts(fc) })
       .catch(() => {})
   }, [])
 
-  // Fusiona el pronóstico en los pairScores y calcula la confluencia macro+COT vs estadística.
+  // Fusiona pronóstico + Markov en los pairScores y calcula la confluencia
+  // macro+COT vs estadística.
   function withForecast(pairScores: PairScore[]): PairScore[] {
     return pairScores.map(ps => {
       const f = forecasts[ps.pair]
       if (!f) return ps
+      const { markov, ...fc } = f
       const macroSign = Math.sign(ps.total)
-      const fcSign = Math.sign(f.score)
+      const fcSign = Math.sign(fc.score)
       const confluence: -1 | 0 | 1 =
         macroSign !== 0 && macroSign === fcSign ? (macroSign as -1 | 1) : 0
-      return { ...ps, forecast: f, confluence }
+      return { ...ps, forecast: fc, markov: markov ?? undefined, confluence }
     })
   }
 

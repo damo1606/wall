@@ -27,15 +27,25 @@ function Bar({ value, max = 16 }: { value: number; max?: number }) {
 
 function PairRow({ p }: { p: PairScore }) {
   const fc = p.forecast
+  const mk = p.markov
   return (
     <div className="flex items-center gap-3">
       <span className="text-xs font-bold text-white w-[68px] flex items-center gap-1">
         {p.pair}
         {p.confluence ? (
-          <span title="Triple confluencia: macro+COT y pronóstico apuntan al mismo lado" className="text-amber-400">⚡</span>
+          <span title="Confluencia: macro+COT y pronóstico apuntan al mismo lado" className="text-amber-400">⚡</span>
         ) : null}
       </span>
       <Bar value={p.total} />
+      {/* Régimen Markov */}
+      <span
+        title={mk ? `Markov: régimen ${mk.state}, señal ${mk.signal}` : 'Markov: sin dato'}
+        className={`text-xs w-3 text-center ${
+          !mk ? 'text-gray-700' : mk.state === 'bull' ? 'text-emerald-400' : mk.state === 'bear' ? 'text-red-400' : 'text-gray-500'
+        }`}
+      >
+        {!mk ? '·' : mk.state === 'bull' ? '↑' : mk.state === 'bear' ? '↓' : '→'}
+      </span>
       <span
         title="Movimiento esperado a 20 velas (ARIMA/GARCH)"
         className={`text-[11px] font-mono w-14 text-right ${

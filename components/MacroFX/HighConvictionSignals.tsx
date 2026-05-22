@@ -11,20 +11,34 @@ interface Props {
 }
 
 export function HighConvictionSignals({ scores, pairScores, threshold, onThresholdChange }: Props) {
-  // Las señales con triple confluencia (macro+COT y pronóstico alineados) van primero.
+  // Cuántas de las 3 dimensiones (macro+COT, pronóstico, régimen Markov)
+  // apuntan al lado dominante del par.
+  const alignCount = (p: PairScore): number => {
+    const dom = Math.sign(p.total)
+    if (dom === 0) return 0
+    const markovDir = p.markov
+      ? (p.markov.state === 'bull' ? 1 : p.markov.state === 'bear' ? -1 : 0)
+      : 0
+    const dirs = [
+      Math.sign(p.total),
+      p.forecast ? Math.sign(p.forecast.score) : 0,
+      markovDir,
+    ]
+    return dirs.filter(d => d === dom).length
+  }
+
+  // Las señales con más dimensiones alineadas van primero.
   const signals = pairScores
     .filter(p => Math.abs(p.total) >= threshold)
     .sort((a, b) => {
-      const ca = a.confluence ? 1 : 0
-      const cb = b.confluence ? 1 : 0
-      if (ca !== cb) return cb - ca
-      return Math.abs(b.total) - Math.abs(a.total)
+      const d = alignCount(b) - alignCount(a)
+      return d !== 0 ? d : Math.abs(b.total) - Math.abs(a.total)
     })
 
   const badge = (p: PairScore) => {
-    if (p.confluence) return { label: '⚡ Triple', cls: 'bg-amber-500/25 text-amber-300 border border-amber-500' }
-    const abs = Math.abs(p.total)
-    if (abs >= 10) return { label: 'Alta', cls: 'bg-amber-900/40 text-amber-400 border border-amber-700' }
+    const a = alignCount(p)
+    if (a >= 3) return { label: '⚡ Triple', cls: 'bg-amber-500/25 text-amber-300 border border-amber-500' }
+    if (a === 2) return { label: 'Alta', cls: 'bg-amber-900/40 text-amber-400 border border-amber-700' }
     return { label: 'Media', cls: 'bg-blue-900/30 text-blue-400 border border-blue-700' }
   }
 

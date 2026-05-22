@@ -28,12 +28,22 @@ export type PairForecast = {
   dailyVol: number        // volatilidad diaria estimada (%)
 }
 
+// Régimen de mercado por cadenas de Markov — dimensión añadida en Fase 3.
+export type PairMarkov = {
+  state: 'bull' | 'side' | 'bear'          // estado actual del par
+  signal: 'COMPRA' | 'VENTA' | 'NEUTRAL'   // señal por probabilidad del próximo estado
+  probBull: number
+  probSide: number
+  probBear: number
+}
+
 export type PairScore = {
   pair: string
   base: Currency
   quote: Currency
   total: number              // macro+COT, rango: -16 a +16
   forecast?: PairForecast     // pronóstico estadístico (opcional, se fusiona en UI)
+  markov?: PairMarkov         // régimen Markov (opcional, se fusiona en UI)
   confluence?: -1 | 0 | 1     // signo si macro+COT y forecast coinciden; 0 si divergen
 }
 
