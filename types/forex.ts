@@ -21,11 +21,20 @@ export type CurrencyScore = {
   cot: number | null
 }
 
+// Pronóstico estadístico (ARIMA/GARCH) de un par FX — dimensión añadida en Fase 2.
+export type PairForecast = {
+  score: number           // retorno/volatilidad del primer paso (señal a riesgo)
+  expectedMovePct: number // movimiento esperado al horizonte (%)
+  dailyVol: number        // volatilidad diaria estimada (%)
+}
+
 export type PairScore = {
   pair: string
   base: Currency
   quote: Currency
-  total: number   // rango: -16 a +16
+  total: number              // macro+COT, rango: -16 a +16
+  forecast?: PairForecast     // pronóstico estadístico (opcional, se fusiona en UI)
+  confluence?: -1 | 0 | 1     // signo si macro+COT y forecast coinciden; 0 si divergen
 }
 
 export type COTData = Partial<Record<Currency, number>>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect } from 'react'
-import type { Currency, MacroIndicator, MacroInput, COTData, CurrencyScore, PairScore } from '@/types/forex'
+import type { Currency, MacroIndicator, MacroInput, COTData, CurrencyScore, PairScore, PairForecast } from '@/types/forex'
 import { emptyInputs } from '@/lib/forex'
 import { KPIPills } from '@/components/MacroFX/KPIPills'
 import { CurrencyRadar } from '@/components/MacroFX/CurrencyRadar'
@@ -62,6 +62,7 @@ export default function MacroFXPage() {
   const [threshold, setThreshold] = useState(6)
   const [loading, setLoading] = useState(false)
   const [fredActuals, setFredActuals] = useState<FredActuals>({})
+  const [forecasts, setForecasts] = useState<Record<string, PairForecast | null>>({})
 
   useEffect(() => {
     const saved = loadFromStorage()
@@ -81,7 +82,26 @@ export default function MacroFXPage() {
         })
       })
       .catch(() => {})
+
+    // Pronóstico ARIMA/GARCH de los 26 pares (dimensión 3, independiente de macro)
+    fetch('/api/macro-fx/forecast')
+      .then(r => r.ok ? r.json() : null)
+      .then((fc: Record<string, PairForecast | null> | null) => { if (fc) setForecasts(fc) })
+      .catch(() => {})
   }, [])
+
+  // Fusiona el pronóstico en los pairScores y calcula la confluencia macro+COT vs estadística.
+  function withForecast(pairScores: PairScore[]): PairScore[] {
+    return pairScores.map(ps => {
+      const f = forecasts[ps.pair]
+      if (!f) return ps
+      const macroSign = Math.sign(ps.total)
+      const fcSign = Math.sign(f.score)
+      const confluence: -1 | 0 | 1 =
+        macroSign !== 0 && macroSign === fcSign ? (macroSign as -1 | 1) : 0
+      return { ...ps, forecast: f, confluence }
+    })
+  }
 
   const handleInputChange = useCallback(
     (currency: Currency, indicator: MacroIndicator, field: 'actual' | 'consensus', value: string) => {
@@ -146,22 +166,25 @@ export default function MacroFXPage() {
 
       {tab === 'resumen' && (
         <div className="flex flex-col gap-4">
-          {computed ? (
+          {computed ? (() => {
+            const pairs = withForecast(computed.pairScores)
+            return (
             <>
-              <KPIPills scores={computed.scores} pairScores={computed.pairScores} />
+              <KPIPills scores={computed.scores} pairScores={pairs} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <CurrencyRadar scores={computed.scores} />
                 <AlignmentHeatmap scores={computed.scores} />
               </div>
-              <TopPairs pairScores={computed.pairScores} />
+              <TopPairs pairScores={pairs} />
               <HighConvictionSignals
                 scores={computed.scores}
-                pairScores={computed.pairScores}
+                pairScores={pairs}
                 threshold={threshold}
                 onThresholdChange={setThreshold}
               />
             </>
-          ) : (
+            )
+          })() : (
             <div className="flex flex-col items-center justify-center py-24 gap-4">
               <p className="text-gray-500 text-sm">Ingresa los datos macro y calcula para ver el análisis.</p>
               <button
