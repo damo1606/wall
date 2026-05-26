@@ -1,0 +1,53 @@
+name: Snapshot diario (cron nocturno)
+
+# Cron de wall — antes vivía en vercel.json; migrado a GitHub Actions porque
+# GitHub no cobra por minutos para esto y es más simple debuggear (Actions tab).
+# La ruta /api/cron/snapshot sigue exigiendo Authorization: Bearer CRON_SECRET,
+# así que el secret debe existir EN AMBOS lados: en Vercel (para que la ruta
+# valide) y en GitHub Secrets (para que el workflow lo envíe).
+
+on:
+  schedule:
+    # 21:00 UTC lunes-viernes (16:00 🇨🇴 / 15:00 🇲🇽)
+    - cron: '0 21 * * 1-5'
+  workflow_dispatch:  # disparo manual desde la pestaña Actions
+
+concurrency:
+  group: cron-snapshot
+  cancel-in-progress: false  # si una corrida se quedó colgada, espera; no spam
+
+jobs:
+  snapshot:
+    name: Disparar /api/cron/snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 6  # la ruta tiene maxDuration=300s + margen
+    steps:
+      - name: GET /api/cron/snapshot con Bearer
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT: https://wall-livid.vercel.app/api/cron/snapshot
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET no está configurado como secret del repo"
+            exit 1
+          fi
+          STATUS=$(curl -sS -X GET "$ENDPOINT" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "User-Agent: github-actions-cron-snapshot" \
+            --max-time 330 \
+            -o /tmp/cron_body.json \
+            -w "%{http_code}")
+          echo "HTTP $STATUS"
+          echo "--- body ---"
+          cat /tmp/cron_body.json
+          echo
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::cron retornó HTTP $STATUS"
+            exit 1
+          fi
+          if ! grep -q '"ok":true' /tmp/cron_body.json; then
+            echo "::error::cron respondió 200 pero ok!=true"
+            exit 1
+          fi
+          echo "✓ cron disparado OK"
