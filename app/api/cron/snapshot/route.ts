@@ -106,7 +106,13 @@ export async function GET(req: NextRequest) {
   if (!scannerPro.ok) { errors.push("scannerPro"); await logDqError(db, runId, "fetch_scanner_pro_failed", { status: scannerPro.status }) }
 
   const macroPhase      = macro.data?.detection?.phase ?? null
-  const macroConfidence = macro.data?.detection?.confidence ?? null
+  // /api/macro devuelve confidence en escala 0-100 (porcentaje), pero el
+  // constraint cycle_classifications_confidence_check exige 0-1 (proporción).
+  // Convertir en el borde para mantener el constraint semántico correcto.
+  const rawConfidence   = macro.data?.detection?.confidence ?? null
+  const macroConfidence = rawConfidence != null
+    ? Math.max(0, Math.min(1, rawConfidence / 100))
+    : null
   const vix             = macro.data?.vix ?? null
   const vix3m           = macro.data?.vix3m ?? null
   const m6Regime        = scannerPro.data?.m6Regime ?? null
@@ -119,7 +125,7 @@ export async function GET(req: NextRequest) {
     const { error } = await db.from("cycle_classifications").insert({
       regime: mappedRegime,
       confidence: macroConfidence,
-      signals: { raw_macro_phase: macroPhase, raw_m6_regime: m6Regime, vix, vix3m, m6Vix, fearScore } as never,
+      signals: { raw_macro_phase: macroPhase, raw_macro_confidence_pct: rawConfidence, raw_m6_regime: m6Regime, vix, vix3m, m6Vix, fearScore } as never,
       cron_run_id: runId,
     })
     if (error) { rowsFailed++; errors.push(`cycle: ${error.message}`) } else { rowsInserted++ }
