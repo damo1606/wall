@@ -14,41 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      alert_triggers: {
-        Row: {
-          alert_id: string
-          delivered: boolean
-          delivery_attempts: number
-          fired_at: string
-          id: string
-          payload: Json | null
-        }
-        Insert: {
-          alert_id: string
-          delivered?: boolean
-          delivery_attempts?: number
-          fired_at?: string
-          id?: string
-          payload?: Json | null
-        }
-        Update: {
-          alert_id?: string
-          delivered?: boolean
-          delivery_attempts?: number
-          fired_at?: string
-          id?: string
-          payload?: Json | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "alert_triggers_alert_id_fkey"
-            columns: ["alert_id"]
-            isOneToOne: false
-            referencedRelation: "alerts"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       alert_events: {
         Row: {
           alert_id: string | null
@@ -107,6 +72,41 @@ export type Database = {
           },
         ]
       }
+      alert_triggers: {
+        Row: {
+          alert_id: string
+          delivered: boolean
+          delivery_attempts: number
+          fired_at: string
+          id: string
+          payload: Json | null
+        }
+        Insert: {
+          alert_id: string
+          delivered?: boolean
+          delivery_attempts?: number
+          fired_at?: string
+          id?: string
+          payload?: Json | null
+        }
+        Update: {
+          alert_id?: string
+          delivered?: boolean
+          delivery_attempts?: number
+          fired_at?: string
+          id?: string
+          payload?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alert_triggers_alert_id_fkey"
+            columns: ["alert_id"]
+            isOneToOne: false
+            referencedRelation: "alerts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       alerts: {
         Row: {
           channel: string
@@ -144,6 +144,13 @@ export type Database = {
             columns: ["symbol_id"]
             isOneToOne: false
             referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alerts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
             referencedColumns: ["id"]
           },
         ]
@@ -247,7 +254,15 @@ export type Database = {
           trades_count?: number | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "backtest_runs_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       company_profile: {
         Row: {
@@ -505,6 +520,13 @@ export type Database = {
             referencedRelation: "symbols"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "diario_entries_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
         ]
       }
       foda_analyses: {
@@ -619,6 +641,72 @@ export type Database = {
           units?: string | null
         }
         Relationships: []
+      }
+      fundamentals_quarterly: {
+        Row: {
+          cron_run_id: string | null
+          debt_to_equity: number | null
+          dividend_yield: number | null
+          ev_ebitda: number | null
+          fcf_yield: number | null
+          id: string
+          payout_ratio: number | null
+          pb: number | null
+          pe: number | null
+          roe: number | null
+          roic: number | null
+          source: string
+          symbol_id: string
+          taken_at: string
+        }
+        Insert: {
+          cron_run_id?: string | null
+          debt_to_equity?: number | null
+          dividend_yield?: number | null
+          ev_ebitda?: number | null
+          fcf_yield?: number | null
+          id?: string
+          payout_ratio?: number | null
+          pb?: number | null
+          pe?: number | null
+          roe?: number | null
+          roic?: number | null
+          source?: string
+          symbol_id: string
+          taken_at?: string
+        }
+        Update: {
+          cron_run_id?: string | null
+          debt_to_equity?: number | null
+          dividend_yield?: number | null
+          ev_ebitda?: number | null
+          fcf_yield?: number | null
+          id?: string
+          payout_ratio?: number | null
+          pb?: number | null
+          pe?: number | null
+          roe?: number | null
+          roic?: number | null
+          source?: string
+          symbol_id?: string
+          taken_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fundamentals_quarterly_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fundamentals_quarterly_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       fundamentals_snapshots: {
         Row: {
@@ -847,6 +935,160 @@ export type Database = {
           },
         ]
       }
+      income_metrics: {
+        Row: {
+          cron_run_id: string | null
+          eps_ttm: number | null
+          id: string
+          revenue_ttm: number | null
+          source: string
+          symbol_id: string
+          taken_at: string
+        }
+        Insert: {
+          cron_run_id?: string | null
+          eps_ttm?: number | null
+          id?: string
+          revenue_ttm?: number | null
+          source?: string
+          symbol_id: string
+          taken_at?: string
+        }
+        Update: {
+          cron_run_id?: string | null
+          eps_ttm?: number | null
+          id?: string
+          revenue_ttm?: number | null
+          source?: string
+          symbol_id?: string
+          taken_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "income_metrics_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "income_metrics_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      index_memberships: {
+        Row: {
+          index_code: string
+          since: string
+          symbol_id: string
+          until: string | null
+        }
+        Insert: {
+          index_code: string
+          since: string
+          symbol_id: string
+          until?: string | null
+        }
+        Update: {
+          index_code?: string
+          since?: string
+          symbol_id?: string
+          until?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "index_memberships_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      industries: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          sector_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          sector_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          sector_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "industries_sector_id_fkey"
+            columns: ["sector_id"]
+            isOneToOne: false
+            referencedRelation: "sectors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      market_snapshots: {
+        Row: {
+          beta: number | null
+          cron_run_id: string | null
+          id: string
+          iv_30d: number | null
+          market_cap: number | null
+          price: number | null
+          source: string
+          symbol_id: string
+          taken_at: string
+        }
+        Insert: {
+          beta?: number | null
+          cron_run_id?: string | null
+          id?: string
+          iv_30d?: number | null
+          market_cap?: number | null
+          price?: number | null
+          source?: string
+          symbol_id: string
+          taken_at?: string
+        }
+        Update: {
+          beta?: number | null
+          cron_run_id?: string | null
+          id?: string
+          iv_30d?: number | null
+          market_cap?: number | null
+          price?: number | null
+          source?: string
+          symbol_id?: string
+          taken_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_snapshots_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_snapshots_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       methodology_snapshots: {
         Row: {
           cron_run_id: string | null
@@ -1036,7 +1278,15 @@ export type Database = {
           type?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "portfolios_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       positions: {
         Row: {
@@ -1076,6 +1326,53 @@ export type Database = {
           },
           {
             foreignKeyName: "positions_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      price_history: {
+        Row: {
+          adj_close: number | null
+          close: number | null
+          date: string
+          fetched_at: string
+          high: number | null
+          low: number | null
+          open: number | null
+          source: string
+          symbol_id: string
+          volume: number | null
+        }
+        Insert: {
+          adj_close?: number | null
+          close?: number | null
+          date: string
+          fetched_at?: string
+          high?: number | null
+          low?: number | null
+          open?: number | null
+          source?: string
+          symbol_id: string
+          volume?: number | null
+        }
+        Update: {
+          adj_close?: number | null
+          close?: number | null
+          date?: string
+          fetched_at?: string
+          high?: number | null
+          low?: number | null
+          open?: number | null
+          source?: string
+          symbol_id?: string
+          volume?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_history_symbol_id_fkey"
             columns: ["symbol_id"]
             isOneToOne: false
             referencedRelation: "symbols"
@@ -1129,6 +1426,57 @@ export type Database = {
             columns: ["symbol_id"]
             isOneToOne: false
             referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospectiva_theses_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      regime_history: {
+        Row: {
+          created_at: string
+          cron_run_id: string | null
+          date: string
+          fear_score: number | null
+          m6_regime: string | null
+          macro_regime: string | null
+          signals: Json | null
+          vix: number | null
+          vix3m: number | null
+        }
+        Insert: {
+          created_at?: string
+          cron_run_id?: string | null
+          date: string
+          fear_score?: number | null
+          m6_regime?: string | null
+          macro_regime?: string | null
+          signals?: Json | null
+          vix?: number | null
+          vix3m?: number | null
+        }
+        Update: {
+          created_at?: string
+          cron_run_id?: string | null
+          date?: string
+          fear_score?: number | null
+          m6_regime?: string | null
+          macro_regime?: string | null
+          signals?: Json | null
+          vix?: number | null
+          vix3m?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regime_history_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
             referencedColumns: ["id"]
           },
         ]
@@ -1226,6 +1574,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      sector_rotation_map: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          macro_phase: string
+          sector_etf: string
+          status: string
+          version: number
+          weight: number
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          macro_phase: string
+          sector_etf: string
+          status: string
+          version?: number
+          weight?: number
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          macro_phase?: string
+          sector_etf?: string
+          status?: string
+          version?: number
+          weight?: number
+        }
+        Relationships: []
       }
       sector_scores: {
         Row: {
@@ -1452,6 +1833,7 @@ export type Database = {
           exchange: string | null
           id: string
           industry: string | null
+          industry_id: string | null
           is_active: boolean
           name: string
           sector_id: string | null
@@ -1465,6 +1847,7 @@ export type Database = {
           exchange?: string | null
           id?: string
           industry?: string | null
+          industry_id?: string | null
           is_active?: boolean
           name: string
           sector_id?: string | null
@@ -1478,6 +1861,7 @@ export type Database = {
           exchange?: string | null
           id?: string
           industry?: string | null
+          industry_id?: string | null
           is_active?: boolean
           name?: string
           sector_id?: string | null
@@ -1485,6 +1869,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "symbols_industry_id_fkey"
+            columns: ["industry_id"]
+            isOneToOne: false
+            referencedRelation: "industries"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "symbols_sector_id_fkey"
             columns: ["sector_id"]
@@ -1571,6 +1962,141 @@ export type Database = {
             referencedRelation: "prospectiva_theses"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "track_record_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trade_entries: {
+        Row: {
+          conditions_met: Json
+          created_at: string
+          cron_run_id: string | null
+          entry_date: string
+          entry_price: number
+          id: string
+          rotation_boost: number | null
+          rotation_status: string | null
+          rule_id: string
+          snapshot_id: string | null
+          status: string
+          symbol_id: string
+        }
+        Insert: {
+          conditions_met: Json
+          created_at?: string
+          cron_run_id?: string | null
+          entry_date: string
+          entry_price: number
+          id?: string
+          rotation_boost?: number | null
+          rotation_status?: string | null
+          rule_id: string
+          snapshot_id?: string | null
+          status?: string
+          symbol_id: string
+        }
+        Update: {
+          conditions_met?: Json
+          created_at?: string
+          cron_run_id?: string | null
+          entry_date?: string
+          entry_price?: number
+          id?: string
+          rotation_boost?: number | null
+          rotation_status?: string | null
+          rule_id?: string
+          snapshot_id?: string | null
+          status?: string
+          symbol_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_entries_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_entries_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "trigger_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_entries_snapshot_id_fkey"
+            columns: ["snapshot_id"]
+            isOneToOne: false
+            referencedRelation: "methodology_snapshots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_entries_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trade_exits: {
+        Row: {
+          created_at: string
+          cron_run_id: string | null
+          days_held: number
+          entry_id: string
+          exit_date: string
+          exit_price: number
+          exit_reason: string
+          return_pct: number
+          return_vs_spy: number | null
+          slippage_bps: number
+        }
+        Insert: {
+          created_at?: string
+          cron_run_id?: string | null
+          days_held: number
+          entry_id: string
+          exit_date: string
+          exit_price: number
+          exit_reason: string
+          return_pct: number
+          return_vs_spy?: number | null
+          slippage_bps?: number
+        }
+        Update: {
+          created_at?: string
+          cron_run_id?: string | null
+          days_held?: number
+          entry_id?: string
+          exit_date?: string
+          exit_price?: number
+          exit_reason?: string
+          return_pct?: number
+          return_vs_spy?: number | null
+          slippage_bps?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_exits_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_exits_entry_id_fkey"
+            columns: ["entry_id"]
+            isOneToOne: true
+            referencedRelation: "trade_entries"
+            referencedColumns: ["id"]
+          },
         ]
       }
       transactions: {
@@ -1624,6 +2150,42 @@ export type Database = {
           },
         ]
       }
+      trigger_rules: {
+        Row: {
+          active: boolean
+          conditions: Json
+          created_at: string
+          description: string | null
+          id: string
+          min_conditions_met: number | null
+          name: string
+          rule_type: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          conditions: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          min_conditions_met?: number | null
+          name: string
+          rule_type: string
+          version: number
+        }
+        Update: {
+          active?: boolean
+          conditions?: Json
+          created_at?: string
+          description?: string | null
+          id?: string
+          min_conditions_met?: number | null
+          name?: string
+          rule_type?: string
+          version?: number
+        }
+        Relationships: []
+      }
       users_profile: {
         Row: {
           base_currency: string
@@ -1652,7 +2214,47 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "users_profile_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      valuation_score_components: {
+        Row: {
+          component_name: string
+          component_value: number | null
+          component_weight: number | null
+          id: string
+          valuation_score_id: string
+        }
+        Insert: {
+          component_name: string
+          component_value?: number | null
+          component_weight?: number | null
+          id?: string
+          valuation_score_id: string
+        }
+        Update: {
+          component_name?: string
+          component_value?: number | null
+          component_weight?: number | null
+          id?: string
+          valuation_score_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "valuation_score_components_valuation_score_id_fkey"
+            columns: ["valuation_score_id"]
+            isOneToOne: false
+            referencedRelation: "valuation_scores"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       valuation_scores: {
         Row: {
@@ -1764,6 +2366,13 @@ export type Database = {
             referencedRelation: "symbols"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "watchlist_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
         ]
       }
     }
@@ -1784,6 +2393,46 @@ export type Database = {
           runs_success: number | null
         }
         Relationships: []
+      }
+      fundamentals_snapshots_v: {
+        Row: {
+          beta: number | null
+          cron_run_id: string | null
+          debt_to_equity: number | null
+          dividend_yield: number | null
+          eps_ttm: number | null
+          ev_ebitda: number | null
+          fcf_yield: number | null
+          id: string | null
+          iv_30d: number | null
+          market_cap: number | null
+          payout_ratio: number | null
+          pb: number | null
+          pe: number | null
+          price: number | null
+          revenue_ttm: number | null
+          roe: number | null
+          roic: number | null
+          source: string | null
+          symbol_id: string | null
+          taken_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_snapshots_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_snapshots_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Functions: {
