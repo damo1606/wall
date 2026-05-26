@@ -48,3 +48,6 @@ next-env.d.ts
 .claude/settings.local.json
 
 .vercel
+
+# binarios grandes — fuera del repo (>100 MB rompe GitHub)
+rico-suave.zip
