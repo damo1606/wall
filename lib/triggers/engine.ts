@@ -2,6 +2,7 @@ import type { TypedClient } from "@/lib/supabase"
 import { CONDITIONS, evaluateCondition, type SnapshotPayload } from "./conditions"
 import { firstFiringExit, type ExitContext, type ExitReason } from "./exits"
 import { loadRotationMap, rotationFor, type MacroPhase, type RotationMap, type RotationStatus } from "./rotation"
+import { hasEventInWindow, isNearEarnings, type MacroEventInfo } from "./events"
 
 export type EngineResult = {
   entriesOpened: number
@@ -11,6 +12,9 @@ export type EngineResult = {
   errors: string[]
   entriesDetail: EntryDetail[]
   exitsDetail:   ExitDetail[]
+  macroEvent: MacroEventInfo
+  skippedByEarnings: number
+  skippedByFomc: number
 }
 
 export type EntryDetail = {
@@ -20,6 +24,7 @@ export type EntryDetail = {
   rotationStatus: RotationStatus
   conditionsMet: number
   conditionsTotal: number
+  earningsWithin5d: boolean
 }
 
 export type ExitDetail = {
@@ -171,6 +176,12 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
   const exitsDetail:   ExitDetail[]  = []
   let entriesOpened = 0
   let exitsClosed   = 0
+  let skippedByEarnings = 0
+  let skippedByFomc     = 0
+
+  // ── Eventos macro: FOMC en próximos 2 días bloquea aperturas ────────────
+  const macroEvent = await hasEventInWindow(db, today, 1)
+  const blockAllOpens = macroEvent.hasFomc
 
   // ── Carga catálogos
   const [rules, rotationMap, { data: symbolsRaw }] = await Promise.all([
@@ -213,6 +224,17 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
   // ── BUY: por símbolo × regla
   for (const snap of snapshots) {
     const ticker = tickerById.get(snap.symbol_id) ?? "?"
+
+    // FOMC: día 0 o día 1 → no abrir absolutamente nada
+    if (blockAllOpens) { skippedByFomc++; continue }
+
+    // Earnings en próximos 3 días → no abrir este símbolo
+    const nearEarnings = isNearEarnings(snap.payload, today, 3)
+    if (nearEarnings) { skippedByEarnings++; continue }
+
+    // earnings_within_5d se calcula con ventana más amplia (5 días) para tag/análisis
+    const earningsWithin5d = isNearEarnings(snap.payload, today, 5)
+
     const sectorYahoo = snap.payload.sector
     const rot = rotationFor(sectorYahoo, macroPhase, rotationMap)
     const liq = liqBySymbol.get(snap.symbol_id)
@@ -266,6 +288,7 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
           entry_price: currentPrice,
           rotation_status: rot.status,
           rotation_boost:  rot.weight,
+          earnings_within_5d: earningsWithin5d,
           cron_run_id: cronRunId,
           status:      "OPEN",
         })
@@ -291,6 +314,7 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
         rotationStatus: rot.status,
         conditionsMet: met,
         conditionsTotal: conditions.length,
+        earningsWithin5d,
       })
     }
   }
@@ -323,9 +347,22 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
 
     if (currentPrice == null || currentPrice <= 0) continue
 
+    // Si hoy hay FOMC o el símbolo tiene earnings hoy/mañana, pausamos
+    // STOP_LOSS y SIGNAL_DEGRADED (reacciones intradía) — los exits
+    // sistémicos (REGIME_FLIP, ROTATION_FLIP, TIME_EXIT) y TAKE_PROFIT siguen.
+    const pauseIntraday =
+      macroEvent.hasFomc ||
+      (cur?.payload ? isNearEarnings(cur.payload, today, 0) : false)
+    const pausedReasons = new Set<ExitReason>(
+      pauseIntraday ? ["STOP_LOSS", "SIGNAL_DEGRADED"] : [],
+    )
+
     // Cualquier SELL rule activa
     for (const { exits } of rules.sell) {
-      const order = [...exits].sort((a,b) => a.order_index - b.order_index).map(x => x.exit_reason)
+      const order = [...exits]
+        .sort((a,b) => a.order_index - b.order_index)
+        .map(x => x.exit_reason)
+        .filter(r => !pausedReasons.has(r))
       const ctx: ExitContext = {
         entry_price:     Number(e.entry_price),
         entry_css:       entryCss,
@@ -378,5 +415,8 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
     errors,
     entriesDetail,
     exitsDetail,
+    macroEvent,
+    skippedByEarnings,
+    skippedByFomc,
   }
 }

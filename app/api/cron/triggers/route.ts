@@ -14,17 +14,23 @@ function buildDiscordMessage(
   m6Regime: string | null,
   result: EngineResult,
 ): string {
-  const header = `**Motor de gatillos ${today}** · macro=${macroPhase} · m6=${m6Regime ?? "?"}`
+  const fomc = result.macroEvent.hasFomc ? " · 🏦 FOMC" : ""
+  const header = `**Motor de gatillos ${today}** · macro=${macroPhase} · m6=${m6Regime ?? "?"}${fomc}`
 
   if (result.entriesOpened === 0 && result.exitsClosed === 0) {
-    return `${header}\n_Sin actividad — ${result.symbolsScanned} símbolo(s) evaluados, ninguno califica._`
+    const skipped = result.skippedByFomc + result.skippedByEarnings
+    const skipNote = skipped > 0
+      ? ` (skip ${result.skippedByFomc} FOMC + ${result.skippedByEarnings} earnings)`
+      : ""
+    return `${header}\n_Sin actividad — ${result.symbolsScanned} símbolo(s) evaluados${skipNote}, ninguno califica._`
   }
 
   const lines: string[] = [header]
   if (result.entriesOpened > 0) {
     lines.push(`\n🟢 **Aperturas (${result.entriesOpened})**`)
     for (const e of result.entriesDetail.slice(0, 8)) {
-      lines.push(`  • **${e.ticker}** · ${e.ruleName} · $${e.entryPrice.toFixed(2)} · ${e.rotationStatus} · ${e.conditionsMet}/${e.conditionsTotal} cond`)
+      const earnTag = e.earningsWithin5d ? " 📅" : ""
+      lines.push(`  • **${e.ticker}** · ${e.ruleName} · $${e.entryPrice.toFixed(2)} · ${e.rotationStatus} · ${e.conditionsMet}/${e.conditionsTotal} cond${earnTag}`)
     }
     if (result.entriesDetail.length > 8) lines.push(`  _… +${result.entriesDetail.length - 8} más_`)
   }
@@ -153,9 +159,12 @@ export async function GET(req: NextRequest) {
     today,
     macroPhase: regimeRow.macro_phase,
     m6Regime:   regimeRow.m6_regime,
+    macroEvent: result.macroEvent,
     entriesOpened: result.entriesOpened,
     exitsClosed:   result.exitsClosed,
     symbolsScanned: result.symbolsScanned,
+    skippedByFomc:     result.skippedByFomc,
+    skippedByEarnings: result.skippedByEarnings,
     rulesEvaluated: result.rulesEvaluated,
     durationMs,
     warnings: result.errors,

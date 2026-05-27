@@ -1153,6 +1153,33 @@ export type Database = {
           },
         ]
       }
+      macro_events: {
+        Row: {
+          created_at: string
+          date: string
+          description: string | null
+          event_type: string
+          id: string
+          importance: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          description?: string | null
+          event_type: string
+          id?: string
+          importance?: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          description?: string | null
+          event_type?: string
+          id?: string
+          importance?: string
+        }
+        Relationships: []
+      }
       market_snapshots: {
         Row: {
           beta: number | null
@@ -2172,6 +2199,7 @@ export type Database = {
         Row: {
           created_at: string
           cron_run_id: string | null
+          earnings_within_5d: boolean | null
           entry_date: string
           entry_price: number
           id: string
@@ -2186,6 +2214,7 @@ export type Database = {
         Insert: {
           created_at?: string
           cron_run_id?: string | null
+          earnings_within_5d?: boolean | null
           entry_date: string
           entry_price: number
           id?: string
@@ -2200,6 +2229,7 @@ export type Database = {
         Update: {
           created_at?: string
           cron_run_id?: string | null
+          earnings_within_5d?: boolean | null
           entry_date?: string
           entry_price?: number
           id?: string
