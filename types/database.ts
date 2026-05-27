@@ -214,6 +214,38 @@ export type Database = {
         }
         Relationships: []
       }
+      backtest_metrics: {
+        Row: {
+          backtest_run_id: string
+          created_at: string
+          id: string
+          metric_name: string
+          metric_value: number
+        }
+        Insert: {
+          backtest_run_id: string
+          created_at?: string
+          id?: string
+          metric_name: string
+          metric_value: number
+        }
+        Update: {
+          backtest_run_id?: string
+          created_at?: string
+          id?: string
+          metric_name?: string
+          metric_value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backtest_metrics_backtest_run_id_fkey"
+            columns: ["backtest_run_id"]
+            isOneToOne: false
+            referencedRelation: "backtest_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       backtest_runs: {
         Row: {
           cagr: number | null
@@ -222,10 +254,16 @@ export type Database = {
           end_date: string | null
           id: string
           max_dd: number | null
+          notes: string | null
+          rule_id: string | null
           sharpe: number | null
           start_date: string | null
           strategy_name: string
+          test_end: string | null
+          test_start: string | null
           trades_count: number | null
+          train_end: string | null
+          train_start: string | null
           user_id: string
         }
         Insert: {
@@ -235,10 +273,16 @@ export type Database = {
           end_date?: string | null
           id?: string
           max_dd?: number | null
+          notes?: string | null
+          rule_id?: string | null
           sharpe?: number | null
           start_date?: string | null
           strategy_name: string
+          test_end?: string | null
+          test_start?: string | null
           trades_count?: number | null
+          train_end?: string | null
+          train_start?: string | null
           user_id: string
         }
         Update: {
@@ -248,18 +292,89 @@ export type Database = {
           end_date?: string | null
           id?: string
           max_dd?: number | null
+          notes?: string | null
+          rule_id?: string | null
           sharpe?: number | null
           start_date?: string | null
           strategy_name?: string
+          test_end?: string | null
+          test_start?: string | null
           trades_count?: number | null
+          train_end?: string | null
+          train_start?: string | null
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "backtest_runs_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "trigger_rules"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "backtest_runs_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      backtest_trades: {
+        Row: {
+          backtest_run_id: string
+          exit_reason: string
+          id: string
+          simulated_entry_date: string
+          simulated_exit_date: string
+          simulated_return_pct: number
+          slippage_bps: number
+          symbol_id: string | null
+          trade_entry_id: string | null
+        }
+        Insert: {
+          backtest_run_id: string
+          exit_reason: string
+          id?: string
+          simulated_entry_date: string
+          simulated_exit_date: string
+          simulated_return_pct: number
+          slippage_bps?: number
+          symbol_id?: string | null
+          trade_entry_id?: string | null
+        }
+        Update: {
+          backtest_run_id?: string
+          exit_reason?: string
+          id?: string
+          simulated_entry_date?: string
+          simulated_exit_date?: string
+          simulated_return_pct?: number
+          slippage_bps?: number
+          symbol_id?: string | null
+          trade_entry_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backtest_trades_backtest_run_id_fkey"
+            columns: ["backtest_run_id"]
+            isOneToOne: false
+            referencedRelation: "backtest_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "backtest_trades_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "backtest_trades_trade_entry_id_fkey"
+            columns: ["trade_entry_id"]
+            isOneToOne: false
+            referencedRelation: "trade_entries"
             referencedColumns: ["id"]
           },
         ]
@@ -1380,6 +1495,68 @@ export type Database = {
           },
         ]
       }
+      price_summary_daily: {
+        Row: {
+          as_of_date: string
+          avg_volume_20d: number | null
+          close: number | null
+          dollar_volume_20d: number | null
+          drop_from_52w_high_pct: number | null
+          return_1d: number | null
+          return_20d: number | null
+          return_5d: number | null
+          return_60d: number | null
+          return_ytd: number | null
+          symbol_id: string
+          updated_at: string
+          vol_20d_annualized: number | null
+          week_52_high: number | null
+          week_52_low: number | null
+        }
+        Insert: {
+          as_of_date: string
+          avg_volume_20d?: number | null
+          close?: number | null
+          dollar_volume_20d?: number | null
+          drop_from_52w_high_pct?: number | null
+          return_1d?: number | null
+          return_20d?: number | null
+          return_5d?: number | null
+          return_60d?: number | null
+          return_ytd?: number | null
+          symbol_id: string
+          updated_at?: string
+          vol_20d_annualized?: number | null
+          week_52_high?: number | null
+          week_52_low?: number | null
+        }
+        Update: {
+          as_of_date?: string
+          avg_volume_20d?: number | null
+          close?: number | null
+          dollar_volume_20d?: number | null
+          drop_from_52w_high_pct?: number | null
+          return_1d?: number | null
+          return_20d?: number | null
+          return_5d?: number | null
+          return_60d?: number | null
+          return_ytd?: number | null
+          symbol_id?: string
+          updated_at?: string
+          vol_20d_annualized?: number | null
+          week_52_high?: number | null
+          week_52_low?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_summary_daily_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: true
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       prospectiva_theses: {
         Row: {
           closed_at: string | null
@@ -1442,34 +1619,46 @@ export type Database = {
           created_at: string
           cron_run_id: string | null
           date: string
+          equity_pcr: number | null
+          fear_label: string | null
           fear_score: number | null
           m6_regime: string | null
-          macro_regime: string | null
-          signals: Json | null
+          macro_confidence: number | null
+          macro_phase: string
           vix: number | null
           vix3m: number | null
+          vix9d: number | null
+          vvix: number | null
         }
         Insert: {
           created_at?: string
           cron_run_id?: string | null
           date: string
+          equity_pcr?: number | null
+          fear_label?: string | null
           fear_score?: number | null
           m6_regime?: string | null
-          macro_regime?: string | null
-          signals?: Json | null
+          macro_confidence?: number | null
+          macro_phase: string
           vix?: number | null
           vix3m?: number | null
+          vix9d?: number | null
+          vvix?: number | null
         }
         Update: {
           created_at?: string
           cron_run_id?: string | null
           date?: string
+          equity_pcr?: number | null
+          fear_label?: string | null
           fear_score?: number | null
           m6_regime?: string | null
-          macro_regime?: string | null
-          signals?: Json | null
+          macro_confidence?: number | null
+          macro_phase?: string
           vix?: number | null
           vix3m?: number | null
+          vix9d?: number | null
+          vvix?: number | null
         }
         Relationships: [
           {
@@ -1581,7 +1770,7 @@ export type Database = {
           created_at: string
           id: string
           macro_phase: string
-          sector_etf: string
+          sector_id: string
           status: string
           version: number
           weight: number
@@ -1591,7 +1780,7 @@ export type Database = {
           created_at?: string
           id?: string
           macro_phase: string
-          sector_etf: string
+          sector_id: string
           status: string
           version?: number
           weight?: number
@@ -1601,12 +1790,20 @@ export type Database = {
           created_at?: string
           id?: string
           macro_phase?: string
-          sector_etf?: string
+          sector_id?: string
           status?: string
           version?: number
           weight?: number
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "sector_rotation_map_sector_id_fkey"
+            columns: ["sector_id"]
+            isOneToOne: false
+            referencedRelation: "sectors"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sector_scores: {
         Row: {
@@ -1973,7 +2170,6 @@ export type Database = {
       }
       trade_entries: {
         Row: {
-          conditions_met: Json
           created_at: string
           cron_run_id: string | null
           entry_date: string
@@ -1982,12 +2178,12 @@ export type Database = {
           rotation_boost: number | null
           rotation_status: string | null
           rule_id: string
+          sector_id: string | null
           snapshot_id: string | null
           status: string
           symbol_id: string
         }
         Insert: {
-          conditions_met: Json
           created_at?: string
           cron_run_id?: string | null
           entry_date: string
@@ -1996,12 +2192,12 @@ export type Database = {
           rotation_boost?: number | null
           rotation_status?: string | null
           rule_id: string
+          sector_id?: string | null
           snapshot_id?: string | null
           status?: string
           symbol_id: string
         }
         Update: {
-          conditions_met?: Json
           created_at?: string
           cron_run_id?: string | null
           entry_date?: string
@@ -2010,6 +2206,7 @@ export type Database = {
           rotation_boost?: number | null
           rotation_status?: string | null
           rule_id?: string
+          sector_id?: string | null
           snapshot_id?: string | null
           status?: string
           symbol_id?: string
@@ -2030,6 +2227,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "trade_entries_sector_id_fkey"
+            columns: ["sector_id"]
+            isOneToOne: false
+            referencedRelation: "sectors"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "trade_entries_snapshot_id_fkey"
             columns: ["snapshot_id"]
             isOneToOne: false
@@ -2041,6 +2245,42 @@ export type Database = {
             columns: ["symbol_id"]
             isOneToOne: false
             referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trade_entry_conditions: {
+        Row: {
+          actual_value: number | null
+          condition_id: string
+          met: boolean
+          trade_entry_id: string
+        }
+        Insert: {
+          actual_value?: number | null
+          condition_id: string
+          met: boolean
+          trade_entry_id: string
+        }
+        Update: {
+          actual_value?: number | null
+          condition_id?: string
+          met?: boolean
+          trade_entry_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trade_entry_conditions_condition_id_fkey"
+            columns: ["condition_id"]
+            isOneToOne: false
+            referencedRelation: "trigger_rule_conditions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trade_entry_conditions_trade_entry_id_fkey"
+            columns: ["trade_entry_id"]
+            isOneToOne: false
+            referencedRelation: "trade_entries"
             referencedColumns: ["id"]
           },
         ]
@@ -2150,10 +2390,105 @@ export type Database = {
           },
         ]
       }
+      trigger_rule_conditions: {
+        Row: {
+          condition_expr: string
+          condition_name: string
+          id: string
+          order_index: number
+          rule_id: string
+        }
+        Insert: {
+          condition_expr: string
+          condition_name: string
+          id?: string
+          order_index?: number
+          rule_id: string
+        }
+        Update: {
+          condition_expr?: string
+          condition_name?: string
+          id?: string
+          order_index?: number
+          rule_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trigger_rule_conditions_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "trigger_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trigger_rule_exits: {
+        Row: {
+          exit_expr: string
+          exit_reason: string
+          id: string
+          order_index: number
+          rule_id: string
+        }
+        Insert: {
+          exit_expr: string
+          exit_reason: string
+          id?: string
+          order_index?: number
+          rule_id: string
+        }
+        Update: {
+          exit_expr?: string
+          exit_reason?: string
+          id?: string
+          order_index?: number
+          rule_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trigger_rule_exits_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "trigger_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trigger_rule_filters: {
+        Row: {
+          filter_key: string
+          filter_value: string
+          id: string
+          op: string
+          rule_id: string
+        }
+        Insert: {
+          filter_key: string
+          filter_value: string
+          id?: string
+          op: string
+          rule_id: string
+        }
+        Update: {
+          filter_key?: string
+          filter_value?: string
+          id?: string
+          op?: string
+          rule_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trigger_rule_filters_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "trigger_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trigger_rules: {
         Row: {
           active: boolean
-          conditions: Json
           created_at: string
           description: string | null
           id: string
@@ -2164,7 +2499,6 @@ export type Database = {
         }
         Insert: {
           active?: boolean
-          conditions: Json
           created_at?: string
           description?: string | null
           id?: string
@@ -2175,7 +2509,6 @@ export type Database = {
         }
         Update: {
           active?: boolean
-          conditions?: Json
           created_at?: string
           description?: string | null
           id?: string
