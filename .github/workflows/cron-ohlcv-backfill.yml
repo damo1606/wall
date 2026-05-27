@@ -85,3 +85,56 @@ jobs:
           echo "Batches:           $BATCH_NUM"
           echo "Tickers procesados: $TOTAL_TICKERS"
           echo "Filas insertadas:   $TOTAL_ROWS"
+
+  price-summary:
+    name: Rollup price_summary_daily
+    needs: backfill
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Loopear /api/cron/price-summary hasta done
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT:    https://wall-livid.vercel.app/api/cron/price-summary
+          BATCH_SIZE:  '500'
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET no configurado"; exit 1
+          fi
+          BATCH_START=0
+          TOTAL_OK=0
+          BATCH_NUM=0
+          while true; do
+            BATCH_NUM=$((BATCH_NUM + 1))
+            echo "=== Rollup batch #$BATCH_NUM  start=$BATCH_START size=$BATCH_SIZE ==="
+            URL="${ENDPOINT}?batch_start=${BATCH_START}&batch_size=${BATCH_SIZE}"
+            STATUS=$(curl -sS -X GET "$URL" \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              -H "User-Agent: github-actions-price-summary" \
+              --max-time 320 \
+              -o /tmp/resp.json \
+              -w "%{http_code}")
+            echo "HTTP $STATUS"
+            cat /tmp/resp.json
+            echo
+            if [ "$STATUS" != "200" ]; then
+              echo "::error::batch #$BATCH_NUM falló (HTTP $STATUS)"; exit 1
+            fi
+            DONE=$(grep -o '"done":[a-z]*' /tmp/resp.json | head -1 | cut -d: -f2)
+            OK=$(grep -o '"summaries_ok":[0-9]*' /tmp/resp.json | head -1 | cut -d: -f2)
+            NEXT=$(grep -o '"next_batch_start":[0-9]*' /tmp/resp.json | head -1 | cut -d: -f2)
+            TOTAL_OK=$((TOTAL_OK + ${OK:-0}))
+            if [ "$DONE" = "true" ]; then
+              echo "✓ rollup completo en batch #$BATCH_NUM"
+              break
+            fi
+            if [ -z "$NEXT" ]; then
+              echo "::warning::no llegó next_batch_start; corto el loop"; break
+            fi
+            BATCH_START=$NEXT
+            sleep 2
+          done
+          echo "=== RESUMEN ROLLUP ==="
+          echo "Batches:    $BATCH_NUM"
+          echo "Símbolos OK: $TOTAL_OK"

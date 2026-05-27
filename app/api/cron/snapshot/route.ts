@@ -129,6 +129,22 @@ export async function GET(req: NextRequest) {
       cron_run_id: runId,
     })
     if (error) { rowsFailed++; errors.push(`cycle: ${error.message}`) } else { rowsInserted++ }
+
+    // ── regime_history (v2): mismo snapshot en columnas planas, PK=date ─────
+    const today = new Date(startedAt).toISOString().slice(0, 10)
+    const { error: rhErr } = await db
+      .from("regime_history")
+      .upsert({
+        date: today,
+        macro_phase: mappedRegime,
+        macro_confidence: macroConfidence,
+        m6_regime: m6Regime,
+        vix: m6Vix ?? vix,
+        vix3m,
+        fear_score: fearScore,
+        cron_run_id: runId,
+      }, { onConflict: "date" })
+    if (rhErr) { rowsFailed++; errors.push(`regime_history: ${rhErr.message}`) } else { rowsInserted++ }
   } else if (macroPhase || m6Regime) {
     await logDqError(db, runId, "regime_unmappable", { macroPhase, m6Regime })
   }
