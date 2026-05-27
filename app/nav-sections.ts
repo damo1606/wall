@@ -20,6 +20,7 @@ export const ACCIONES: NavPage[] = [
 
 export const INSTITUCIONAL: NavPage[] = [
   { href: "/sore",          label: "SORE" },
+  { href: "/triggers",      label: "Gatillos" },
   { href: "/backtest",      label: "Backtest" },
   { href: "/track-record",  label: "Track Record" },
   { href: "/gex",           label: "GEX" },
