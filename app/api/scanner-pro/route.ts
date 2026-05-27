@@ -357,7 +357,7 @@ async function analyzeTickerFull(
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const universe    = searchParams.get("universe") ?? "sp500";
-  const limit       = Math.min(parseInt(searchParams.get("limit") ?? "20"), 30);
+  const limit       = Math.min(parseInt(searchParams.get("limit") ?? "20"), 100);
   const minBuyScore = parseInt(searchParams.get("minBuyScore") ?? "50");
 
   // 1. Fetch fundamental screener (directo, sin HTTP interno)

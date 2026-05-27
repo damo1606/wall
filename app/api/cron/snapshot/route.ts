@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
     timedFetch<{ detection?: { phase?: string; confidence?: number }; vix?: number; vix3m?: number }>(`${base}/api/macro`),
     timedFetch<unknown>(`${base}/api/sectors-etf`),
     timedFetch<{ rows: Array<Record<string, unknown>>; m6Regime?: string; m6Vix?: number }>(
-      `${base}/api/scanner-pro?universe=sp500&limit=50&minBuyScore=0`
+      `${base}/api/scanner-pro?universe=sp500&limit=100&minBuyScore=0`
     ),
   ])
 
