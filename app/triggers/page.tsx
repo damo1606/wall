@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import type { TriggersState } from "@/app/api/triggers/state/route"
+import { scoreColorClass, scoreTier } from "@/lib/triggers/scoring"
 
 // ── Formatters inline (mismo patrón que el resto del proyecto) ─────────────
 function usd(v: number | null | undefined): string {
@@ -91,40 +92,52 @@ export default function TriggersPage() {
         {data.openEntries.length === 0 ? (
           <p className="text-sm text-gray-500 italic">Sin posiciones abiertas.</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-gray-400 border-b border-gray-800">
-                <tr>
-                  <Th>Ticker</Th>
-                  <Th>Regla</Th>
-                  <Th>Entry date</Th>
-                  <Th className="text-right">Entry $</Th>
-                  <Th className="text-right">Actual $</Th>
-                  <Th className="text-right">P&amp;L</Th>
-                  <Th className="text-right">Días</Th>
-                  <Th>Rotación</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.openEntries.map(e => (
-                  <tr key={e.id} className="border-b border-gray-800/60">
-                    <Td className="font-semibold">{e.ticker}</Td>
-                    <Td className="text-gray-300 font-mono text-xs">{e.ruleName}</Td>
-                    <Td className="text-gray-400">{e.entryDate}</Td>
-                    <Td className="text-right font-mono">{usd(e.entryPrice)}</Td>
-                    <Td className="text-right font-mono">{usd(e.currentPrice)}</Td>
-                    <Td className={`text-right font-mono ${pctClass(e.unrealizedPct)}`}>{pct(e.unrealizedPct)}</Td>
-                    <Td className="text-right text-gray-400">{e.daysOpen}d</Td>
-                    <Td>
-                      <span className={`inline-block px-2 py-0.5 rounded border text-xs ${rotationBadge(e.rotationStatus)}`}>
-                        {e.rotationStatus ?? "—"}
-                      </span>
-                    </Td>
+          <>
+            <ScoreLegend />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-gray-400 border-b border-gray-800">
+                  <tr>
+                    <Th>Ticker</Th>
+                    <Th>Regla</Th>
+                    <Th className="text-center">Score</Th>
+                    <Th className="text-right">Cond.</Th>
+                    <Th>Entry date</Th>
+                    <Th className="text-right">Entry $</Th>
+                    <Th className="text-right">Actual $</Th>
+                    <Th className="text-right">P&amp;L</Th>
+                    <Th className="text-right">Días</Th>
+                    <Th>Rotación</Th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {data.openEntries.map(e => (
+                    <tr key={e.id} className="border-b border-gray-800/60">
+                      <Td className="font-semibold">{e.ticker}</Td>
+                      <Td className="text-gray-300 font-mono text-xs">{e.ruleName}</Td>
+                      <Td className="text-center">
+                        <span className={`inline-flex items-center justify-center w-14 py-1 rounded border font-mono text-sm font-bold ${scoreColorClass(e.triggerScore)}`}
+                              title={scoreTier(e.triggerScore)}>
+                          {e.triggerScore}
+                        </span>
+                      </Td>
+                      <Td className="text-right text-gray-300 font-mono text-xs">{e.conditionsMet}/{e.conditionsTotal}</Td>
+                      <Td className="text-gray-400">{e.entryDate}</Td>
+                      <Td className="text-right font-mono">{usd(e.entryPrice)}</Td>
+                      <Td className="text-right font-mono">{usd(e.currentPrice)}</Td>
+                      <Td className={`text-right font-mono ${pctClass(e.unrealizedPct)}`}>{pct(e.unrealizedPct)}</Td>
+                      <Td className="text-right text-gray-400">{e.daysOpen}d</Td>
+                      <Td>
+                        <span className={`inline-block px-2 py-0.5 rounded border text-xs ${rotationBadge(e.rotationStatus)}`}>
+                          {e.rotationStatus ?? "—"}
+                        </span>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </Section>
 
@@ -176,12 +189,18 @@ export default function TriggersPage() {
           <div className="space-y-2">
             {data.conditionAttribution.map(c => {
               const pctRate = c.metRate * 100
+              // Heatmap: el bar usa el mismo color tier que el score
+              const barColor =
+                pctRate >= 80 ? "bg-emerald-500/70" :
+                pctRate >= 60 ? "bg-yellow-500/70" :
+                pctRate >= 40 ? "bg-orange-500/70" :
+                                "bg-red-500/70"
               return (
                 <div key={c.conditionName} className="flex items-center gap-3 text-sm">
                   <div className="w-44 font-mono text-xs text-gray-300">{c.conditionName}</div>
                   <div className="flex-1 h-6 bg-gray-900 rounded overflow-hidden border border-gray-800">
                     <div
-                      className="h-full bg-emerald-600/60 transition-all"
+                      className={`h-full transition-all ${barColor}`}
                       style={{ width: `${pctRate}%` }}
                     />
                   </div>
@@ -212,6 +231,28 @@ function Th({ children, className = "" }: { children: React.ReactNode; className
 }
 function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <td className={`py-2 px-2 ${className}`}>{children}</td>
+}
+
+function ScoreLegend() {
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-gray-400">
+      <span className="text-gray-500">TriggerScore:</span>
+      <LegendChip range="80–100" label="fuerte"   className={scoreColorClass(90)} />
+      <LegendChip range="60–80"  label="moderado" className={scoreColorClass(70)} />
+      <LegendChip range="40–60"  label="tibio"    className={scoreColorClass(50)} />
+      <LegendChip range="0–40"   label="débil"    className={scoreColorClass(20)} />
+      <span className="text-gray-500 ml-auto">condiciones (50pts) + rotación (25) + liquidez (15) + macro (10)</span>
+    </div>
+  )
+}
+
+function LegendChip({ range, label, className }: { range: string; label: string; className: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${className}`}>
+      <span className="font-mono">{range}</span>
+      <span className="text-[10px] uppercase tracking-wide opacity-80">{label}</span>
+    </span>
+  )
 }
 
 function StatCard({ label, value, color = "neutral" }: {

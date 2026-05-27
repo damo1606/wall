@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase"
+import { computeTriggerScore } from "@/lib/triggers/scoring"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -15,6 +16,9 @@ export type TriggersState = {
     currentPrice: number | null
     unrealizedPct: number | null
     daysOpen: number
+    triggerScore: number  // 0-100
+    conditionsMet: number
+    conditionsTotal: number
   }>
   recentExits: Array<{
     id: string
@@ -89,7 +93,8 @@ export async function GET(): Promise<NextResponse<TriggersState | { error: strin
   const symbolIds = Array.from(allSymbolIds)
   const ruleIds   = Array.from(allRuleIds)
 
-  const [symbolsR, rulesR, pricesR] = await Promise.all([
+  const openEntryIds = (openRaw ?? []).map(e => e.id)
+  const [symbolsR, rulesR, pricesR, condCountsR, latestRegimeR] = await Promise.all([
     symbolIds.length
       ? db.from("symbols").select("id, ticker").in("id", symbolIds)
       : Promise.resolve({ data: [] as Array<{ id: string; ticker: string }> }),
@@ -97,12 +102,30 @@ export async function GET(): Promise<NextResponse<TriggersState | { error: strin
       ? db.from("trigger_rules").select("id, name").in("id", ruleIds)
       : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
     symbolIds.length
-      ? db.from("price_summary_daily").select("symbol_id, close").in("symbol_id", symbolIds)
-      : Promise.resolve({ data: [] as Array<{ symbol_id: string; close: number | null }> }),
+      ? db.from("price_summary_daily").select("symbol_id, close, dollar_volume_20d").in("symbol_id", symbolIds)
+      : Promise.resolve({ data: [] as Array<{ symbol_id: string; close: number | null; dollar_volume_20d: number | null }> }),
+    openEntryIds.length
+      ? db.from("trade_entry_conditions").select("trade_entry_id, met").in("trade_entry_id", openEntryIds)
+      : Promise.resolve({ data: [] as Array<{ trade_entry_id: string; met: boolean }> }),
+    db.from("regime_history").select("macro_confidence").order("date", { ascending: false }).limit(1).maybeSingle(),
   ])
   const tickerById = new Map((symbolsR.data ?? []).map(s => [s.id, s.ticker]))
   const ruleNameById = new Map((rulesR.data ?? []).map(r => [r.id, r.name]))
   const closeBySymbol = new Map((pricesR.data ?? []).map(p => [p.symbol_id, p.close ? Number(p.close) : null]))
+  const dvolBySymbol  = new Map((pricesR.data ?? []).map(p => [p.symbol_id, p.dollar_volume_20d ? Number(p.dollar_volume_20d) : null]))
+
+  // Conditions met/total por trade_entry_id
+  const condStatsByEntry = new Map<string, { met: number; total: number }>()
+  for (const c of condCountsR.data ?? []) {
+    const cur = condStatsByEntry.get(c.trade_entry_id) ?? { met: 0, total: 0 }
+    cur.total++
+    if (c.met) cur.met++
+    condStatsByEntry.set(c.trade_entry_id, cur)
+  }
+
+  const macroConf = latestRegimeR.data?.macro_confidence != null
+    ? Number(latestRegimeR.data.macro_confidence)
+    : null
 
   const today = new Date()
   const daysSince = (d: string) => Math.max(0, Math.floor((today.getTime() - Date.parse(d)) / 86_400_000))
@@ -111,6 +134,17 @@ export async function GET(): Promise<NextResponse<TriggersState | { error: strin
     const cur = closeBySymbol.get(r.symbol_id) ?? null
     const entryPrice = Number(r.entry_price)
     const unrealized = cur != null && entryPrice > 0 ? ((cur - entryPrice) / entryPrice) * 100 : null
+
+    const stats = condStatsByEntry.get(r.id) ?? { met: 0, total: 0 }
+    const rotation = (r.rotation_status as "FAVORED" | "NEUTRAL" | "AVOID" | null) ?? null
+    const triggerScore = computeTriggerScore({
+      conditionsMet:   stats.met,
+      conditionsTotal: stats.total,
+      rotationStatus:  rotation,
+      dollarVolume20d: dvolBySymbol.get(r.symbol_id) ?? null,
+      macroConfidence: macroConf,
+    })
+
     return {
       id: r.id,
       ticker: tickerById.get(r.symbol_id) ?? "?",
@@ -121,6 +155,9 @@ export async function GET(): Promise<NextResponse<TriggersState | { error: strin
       currentPrice: cur,
       unrealizedPct: unrealized,
       daysOpen: daysSince(r.entry_date),
+      triggerScore,
+      conditionsMet: stats.met,
+      conditionsTotal: stats.total,
     }
   })
 
