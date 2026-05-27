@@ -9,6 +9,27 @@ export type EngineResult = {
   symbolsScanned: number
   rulesEvaluated: number
   errors: string[]
+  entriesDetail: EntryDetail[]
+  exitsDetail:   ExitDetail[]
+}
+
+export type EntryDetail = {
+  ticker: string
+  ruleName: string
+  entryPrice: number
+  rotationStatus: RotationStatus
+  conditionsMet: number
+  conditionsTotal: number
+}
+
+export type ExitDetail = {
+  ticker: string
+  ruleName: string
+  exitReason: ExitReason
+  exitPrice: number
+  entryPrice: number
+  returnPct: number
+  daysHeld: number
 }
 
 type RuleHeader = {
@@ -146,6 +167,8 @@ export type EngineDeps = {
 export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
   const { db, cronRunId, today, macroPhase, m6Regime } = deps
   const errors: string[] = []
+  const entriesDetail: EntryDetail[] = []
+  const exitsDetail:   ExitDetail[]  = []
   let entriesOpened = 0
   let exitsClosed   = 0
 
@@ -261,6 +284,14 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
         if (condErr) errors.push(`${ticker}/${rule.name}: insert conditions — ${condErr.message}`)
       }
       entriesOpened++
+      entriesDetail.push({
+        ticker,
+        ruleName: rule.name,
+        entryPrice: currentPrice,
+        rotationStatus: rot.status,
+        conditionsMet: met,
+        conditionsTotal: conditions.length,
+      })
     }
   }
 
@@ -324,6 +355,18 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
       if (exErr) { errors.push(`exit ${e.id}: ${exErr.message}`); continue }
       await db.from("trade_entries").update({ status: "CLOSED" }).eq("id", e.id)
       exitsClosed++
+      const ticker = tickerById.get(e.symbol_id) ?? "?"
+      // Recuperar nombre de regla SELL (la primera y única usada)
+      const sellRule = rules.sell[0]?.rule.name ?? "rule_v1_sell"
+      exitsDetail.push({
+        ticker,
+        ruleName: sellRule,
+        exitReason: fired,
+        exitPrice: currentPrice,
+        entryPrice: Number(e.entry_price),
+        returnPct,
+        daysHeld,
+      })
       break  // primer exit que dispara cierra; no se evalúan más reglas
     }
   }
@@ -333,5 +376,7 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
     symbolsScanned: snapshots.length,
     rulesEvaluated: rules.buy.length + rules.sell.length,
     errors,
+    entriesDetail,
+    exitsDetail,
   }
 }

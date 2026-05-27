@@ -1,7 +1,54 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase"
-import { runEngine } from "@/lib/triggers/engine"
+import { runEngine, type EngineResult } from "@/lib/triggers/engine"
 import type { MacroPhase } from "@/lib/triggers/rotation"
+
+// Mensaje compacto para Discord. Diseño:
+//   - Header con fecha + contexto macro
+//   - Si hay aperturas: 🟢 lista (max 8)
+//   - Si hay cierres:   🔴 lista (max 8) con razón y P&L
+//   - Si nada se movió: bloque "Sin actividad" para que sepas que sí corrió
+function buildDiscordMessage(
+  today: string,
+  macroPhase: string,
+  m6Regime: string | null,
+  result: EngineResult,
+): string {
+  const header = `**Motor de gatillos ${today}** · macro=${macroPhase} · m6=${m6Regime ?? "?"}`
+
+  if (result.entriesOpened === 0 && result.exitsClosed === 0) {
+    return `${header}\n_Sin actividad — ${result.symbolsScanned} símbolo(s) evaluados, ninguno califica._`
+  }
+
+  const lines: string[] = [header]
+  if (result.entriesOpened > 0) {
+    lines.push(`\n🟢 **Aperturas (${result.entriesOpened})**`)
+    for (const e of result.entriesDetail.slice(0, 8)) {
+      lines.push(`  • **${e.ticker}** · ${e.ruleName} · $${e.entryPrice.toFixed(2)} · ${e.rotationStatus} · ${e.conditionsMet}/${e.conditionsTotal} cond`)
+    }
+    if (result.entriesDetail.length > 8) lines.push(`  _… +${result.entriesDetail.length - 8} más_`)
+  }
+  if (result.exitsClosed > 0) {
+    lines.push(`\n🔴 **Cierres (${result.exitsClosed})**`)
+    for (const x of result.exitsDetail.slice(0, 8)) {
+      const sign = x.returnPct >= 0 ? "+" : ""
+      lines.push(`  • **${x.ticker}** · ${x.exitReason} · $${x.entryPrice.toFixed(2)}→$${x.exitPrice.toFixed(2)} (${sign}${x.returnPct.toFixed(1)}%, ${x.daysHeld}d)`)
+    }
+    if (result.exitsDetail.length > 8) lines.push(`  _… +${result.exitsDetail.length - 8} más_`)
+  }
+  return lines.join("\n")
+}
+
+async function postDiscord(webhook: string, content: string): Promise<void> {
+  try {
+    await fetch(webhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Discord trunca a 2000 chars
+      body: JSON.stringify({ content: content.slice(0, 1900) }),
+    })
+  } catch { /* no romper el cron por un webhook caído */ }
+}
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -85,6 +132,19 @@ export async function GET(req: NextRequest) {
     duration_ms: durationMs,
     error_summary: result.errors.length ? result.errors.slice(0, 5).join(" | ") : null,
   }).eq("id", runId)
+
+  // Discord webhook — solo si hay movimiento o si es la primera corrida del día.
+  // No se notifica "sin actividad" todos los días para no ahogar el canal.
+  const webhook = process.env.DISCORD_WEBHOOK_URL
+  if (webhook && (result.entriesOpened > 0 || result.exitsClosed > 0)) {
+    const content = buildDiscordMessage(
+      today,
+      regimeRow.macro_phase as string,
+      regimeRow.m6_regime,
+      result,
+    )
+    await postDiscord(webhook, content)
+  }
 
   return NextResponse.json({
     ok: status !== "failed",
