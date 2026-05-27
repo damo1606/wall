@@ -51,3 +51,36 @@ jobs:
             exit 1
           fi
           echo "✓ cron disparado OK"
+
+  triggers:
+    name: Motor de gatillos /api/cron/triggers
+    needs: snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: GET /api/cron/triggers con Bearer
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT: https://wall-livid.vercel.app/api/cron/triggers
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET no está configurado"; exit 1
+          fi
+          STATUS=$(curl -sS -X GET "$ENDPOINT" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "User-Agent: github-actions-trigger-engine" \
+            --max-time 330 \
+            -o /tmp/trig_body.json \
+            -w "%{http_code}")
+          echo "HTTP $STATUS"
+          echo "--- body ---"
+          cat /tmp/trig_body.json
+          echo
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::triggers retornó HTTP $STATUS"; exit 1
+          fi
+          if ! grep -q '"ok":true' /tmp/trig_body.json; then
+            echo "::error::triggers respondió 200 pero ok!=true"; exit 1
+          fi
+          echo "✓ motor de gatillos OK"
