@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCrumb, fetchStockData } from "@/lib/yahoo";
+
+// Sin esto Next.js trata el GET como static/cacheable y, cuando el cron snapshot
+// lo llama internamente, recibe una versión cacheada antigua (~5 filas) en vez
+// de la respuesta fresca (~99 filas).
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS } from "@/lib/symbols";
 import { computeAnalysis } from "@/lib/gex";
 import { computeAnalysis2 } from "@/lib/gex2";
