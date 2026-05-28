@@ -66,34 +66,52 @@ export async function GET(req: NextRequest) {
   }
 
   const takenAt = new Date().toISOString()
-  let fundOk = 0, incomeOk = 0, profileOk = 0, failed = 0
+  let marketOk = 0, quarterlyOk = 0, incomeOk = 0, profileOk = 0
+  let fetchFailed = 0, insertErrors = 0
   const failedTickers: string[] = []
+  const insertErrMsgs: string[] = []
+
+  // 23505 = unique_violation. Las tablas hijas tienen un índice one-per-day,
+  // así que un re-run del mismo día choca: la fila ya existe, no es un fallo.
+  const benign = (e: { code?: string } | null) => e?.code === "23505"
+  const noteErr = (ticker: string, where: string, e: { message?: string } | null) => {
+    insertErrors++
+    if (insertErrMsgs.length < 5) insertErrMsgs.push(`${ticker}/${where}: ${(e?.message ?? "").slice(0, 30)}`)
+  }
 
   await pool(syms, CONCURRENCY, async (s) => {
     const d = await fetchStockData(s.ticker, false)
-    if (!d) { failed++; failedTickers.push(s.ticker); return }
+    if (!d) { fetchFailed++; failedTickers.push(s.ticker); return }
 
     const fcfYield = d.marketCap > 0 && d.freeCashflow ? d.freeCashflow / d.marketCap : null
 
-    // fundamentals_snapshots
-    const { error: fErr } = await db.from("fundamentals_snapshots").insert({
+    // market_snapshots — precio + cap + beta + IV (cambian a diario)
+    const { error: mErr } = await db.from("market_snapshots").insert({
       symbol_id: s.id, taken_at: takenAt, cron_run_id: runId,
       price: d.currentPrice || null, market_cap: d.marketCap || null,
+      beta: d.beta || null, iv_30d: null, source: "yahoo",
+    } as never)
+    if (!mErr) marketOk++
+    else if (!benign(mErr)) noteErr(s.ticker, "market", mErr)
+
+    // fundamentals_quarterly — múltiplos y ratios derivados
+    const { error: qErr } = await db.from("fundamentals_quarterly").insert({
+      symbol_id: s.id, taken_at: takenAt, cron_run_id: runId,
       pe: d.pe || null, pb: d.pb || null, ev_ebitda: d.evToEbitda || null,
       roe: d.roe || null, roic: d.hasROIC ? d.roic : null, fcf_yield: fcfYield,
-      debt_to_equity: d.debtToEquity || null, revenue_ttm: d.totalRevenue || null,
-      eps_ttm: d.eps || null, dividend_yield: d.dividendYield || null,
-      payout_ratio: d.payoutRatio || null, beta: d.beta || null, iv_30d: null,
-      source: "yahoo",
+      debt_to_equity: d.debtToEquity || null, dividend_yield: d.dividendYield || null,
+      payout_ratio: d.payoutRatio || null, source: "yahoo",
     } as never)
-    if (!fErr) fundOk++
+    if (!qErr) quarterlyOk++
+    else if (!benign(qErr)) noteErr(s.ticker, "quarterly", qErr)
 
-    // income_metrics
+    // income_metrics — TTM revenue + EPS
     const { error: iErr } = await db.from("income_metrics").insert({
       symbol_id: s.id, taken_at: takenAt, cron_run_id: runId,
       revenue_ttm: d.totalRevenue || null, eps_ttm: d.eps || null, source: "yahoo",
     } as never)
     if (!iErr) incomeOk++
+    else if (!benign(iErr)) noteErr(s.ticker, "income", iErr)
 
     // company_profile (upsert — 1 fila por símbolo)
     const { error: pErr } = await db.from("company_profile").upsert({
@@ -104,25 +122,33 @@ export async function GET(req: NextRequest) {
       updated_at: takenAt,
     } as never, { onConflict: "symbol_id" })
     if (!pErr) profileOk++
+    else noteErr(s.ticker, "profile", pErr)
   })
 
   const durationMs = Date.now() - startedAt
+  const rowsInserted = marketOk + quarterlyOk + incomeOk + profileOk
+  const hadProblems = fetchFailed > 0 || insertErrors > 0
   const status: "success" | "partial" | "failed" =
-    failed === 0 ? "success" : (fundOk > 0 ? "partial" : "failed")
+    !hadProblems ? "success" : (rowsInserted > 0 ? "partial" : "failed")
+
+  const summaryParts: string[] = []
+  if (fetchFailed)  summaryParts.push(`${fetchFailed} fetch fail: ${failedTickers.slice(0, 5).join(", ")}`)
+  if (insertErrors) summaryParts.push(`${insertErrors} insert err: ${insertErrMsgs.join("; ")}`)
 
   await db.from("cron_runs").update({
     finished_at: new Date().toISOString(), status,
-    rows_inserted: fundOk + incomeOk + profileOk, rows_failed: failed,
+    rows_inserted: rowsInserted, rows_failed: fetchFailed + insertErrors,
     duration_ms: durationMs,
-    error_summary: failedTickers.length ? `${failed} fallidos: ${failedTickers.slice(0,5).join(", ")}` : null,
+    error_summary: summaryParts.length ? summaryParts.join(" | ") : null,
   }).eq("id", runId)
 
   const done = syms.length < batchSize
   return NextResponse.json({
     ok: status !== "failed", runId, status,
     batch_start: batchStart, batch_size: batchSize,
-    processed: syms.length, fundamentals_ok: fundOk, income_ok: incomeOk, profile_ok: profileOk,
-    failed, duration_ms: durationMs,
+    processed: syms.length,
+    market_ok: marketOk, quarterly_ok: quarterlyOk, income_ok: incomeOk, profile_ok: profileOk,
+    fetch_failed: fetchFailed, insert_errors: insertErrors, duration_ms: durationMs,
     next_batch_start: done ? null : batchStart + batchSize, done,
   })
 }
