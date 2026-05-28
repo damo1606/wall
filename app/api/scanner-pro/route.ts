@@ -30,6 +30,12 @@ let _m6Cache: { data: Analysis6Result; ts: number } | null = null
 let _m6Promise: Promise<Analysis6Result> | null = null
 const M6_TTL = 5 * 60 * 1000
 
+// Señal de que un ticker genuinamente NO tiene opciones listadas (200 OK, con
+// precio, pero sin expiraciones). Un error HTTP/red es transitorio y NO usa esto.
+class NoOptionsError extends Error {
+  constructor(symbol: string) { super(`No options for ${symbol}`); this.name = "NoOptionsError" }
+}
+
 async function fetchOptions(ticker: string, cookie: string, crumb: string, dateTs?: number) {
   const params = new URLSearchParams({ crumb });
   if (dateTs) params.set("date", String(dateTs));
@@ -121,10 +127,15 @@ async function fetchMarketRegime(cookie: string, crumb: string): Promise<Analysi
 async function getCachedM6(cookie: string, crumb: string): Promise<Analysis6Result> {
   if (_m6Cache && Date.now() - _m6Cache.ts < M6_TTL) return _m6Cache.data
   if (!_m6Promise) _m6Promise = fetchMarketRegime(cookie, crumb)
-  const data = await _m6Promise
-  _m6Cache = { data, ts: Date.now() }
-  _m6Promise = null
-  return data
+  try {
+    const data = await _m6Promise
+    _m6Cache = { data, ts: Date.now() }
+    return data
+  } finally {
+    // Reset también en rechazo: si no, el promise rechazado queda cacheado y
+    // toda request posterior en la instancia warm re-lanza sin reintentar Yahoo.
+    _m6Promise = null
+  }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -191,7 +202,8 @@ export interface ConvictionRow {
   soreVRP: number;          // Vol Risk Premium proxy (0–100)
   soreStrategy: string;     // SHORT STRANGLE | IRON CONDOR | BWB | CREDIT SPREAD | CALENDAR | AVOID
   soreGate: "GO" | "WAIT" | "AVOID";
-  noOptions?: boolean;
+  noOptions?: boolean;   // true solo si el ticker realmente no tiene opciones
+  scanError?: boolean;   // true si el scan falló por causa transitoria (Yahoo/red)
 }
 
 // ── Scoring helpers ───────────────────────────────────────────────────────────
@@ -297,6 +309,8 @@ async function analyzeTickerFull(
   if (!spot) throw new Error(`No price for ${symbol}`);
 
   const expTimestamps: number[] = initial.expirationDates ?? [];
+  // 200 OK con precio pero sin expiraciones = genuinamente sin opciones.
+  if (expTimestamps.length === 0) throw new NoOptionsError(symbol);
   const expirations = expTimestamps.map(
     (ts) => new Date(ts * 1000).toISOString().split("T")[0]
   );
@@ -482,7 +496,9 @@ export async function GET(request: NextRequest) {
             soreStrategy: sore.strategy,
             soreGate: sore.gate,
           } satisfies ConvictionRow;
-        } catch {
+        } catch (e) {
+          const genuinelyNoOptions = e instanceof NoOptionsError;
+          if (!genuinelyNoOptions) console.error(`[scanner-pro] scan failed for ${stock.symbol}:`, e);
           const conviction = calcConviction(score.buyScore, 0, false);
           return {
             symbol: stock.symbol,
@@ -517,7 +533,8 @@ export async function GET(request: NextRequest) {
             verdict: toVerdict(conviction),
             soreCSS: 0, soreDSS: 0, soreVSS: 0, soreVRP: 0,
             soreStrategy: "AVOID", soreGate: "AVOID",
-            noOptions: true,
+            noOptions: genuinelyNoOptions,
+            scanError: !genuinelyNoOptions,
           } satisfies ConvictionRow;
         }
       })
