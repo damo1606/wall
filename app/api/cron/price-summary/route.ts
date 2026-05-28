@@ -116,18 +116,31 @@ async function processBatch(db: TypedClient, symbolIds: string[]): Promise<{ ok:
   cutoff.setDate(cutoff.getDate() - 380)
   const cutoffStr = cutoff.toISOString().slice(0, 10)
 
-  const { data: prices, error } = await db
-    .from("price_history")
-    .select("symbol_id, date, close, adj_close, volume")
-    .in("symbol_id", symbolIds)
-    .gte("date", cutoffStr)
-    .order("symbol_id", { ascending: true })
-    .order("date", { ascending: true })
-
-  if (error) return { ok: 0, failed: symbolIds.length, err: error.message }
+  // PostgREST corta a 1000 filas por respuesta. Con ~250 días por símbolo,
+  // un chunk de 50 símbolos = ~12.5k filas → se truncaba y la mayoría de
+  // símbolos quedaban sin datos (rollup null → "failed"). Paginamos con
+  // .range() hasta agotar las filas del chunk.
+  const PAGE = 1000
+  const prices: PriceRow[] = []
+  let from = 0
+  while (true) {
+    const { data, error } = await db
+      .from("price_history")
+      .select("symbol_id, date, close, adj_close, volume")
+      .in("symbol_id", symbolIds)
+      .gte("date", cutoffStr)
+      .order("symbol_id", { ascending: true })
+      .order("date", { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) return { ok: 0, failed: symbolIds.length, err: error.message }
+    const page = (data ?? []) as PriceRow[]
+    prices.push(...page)
+    if (page.length < PAGE) break
+    from += PAGE
+  }
 
   const grouped = new Map<string, PriceRow[]>()
-  for (const row of (prices ?? []) as PriceRow[]) {
+  for (const row of prices) {
     const arr = grouped.get(row.symbol_id) ?? []
     arr.push(row)
     grouped.set(row.symbol_id, arr)

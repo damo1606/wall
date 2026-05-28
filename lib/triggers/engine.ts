@@ -3,6 +3,7 @@ import { CONDITIONS, evaluateCondition, type SnapshotPayload } from "./condition
 import { firstFiringExit, type ExitContext, type ExitReason } from "./exits"
 import { loadRotationMap, rotationFor, type MacroPhase, type RotationMap, type RotationStatus } from "./rotation"
 import { hasEventInWindow, isNearEarnings, type MacroEventInfo } from "./events"
+import { checkEligibility } from "./eligibility"
 
 export type EngineResult = {
   entriesOpened: number
@@ -15,6 +16,7 @@ export type EngineResult = {
   macroEvent: MacroEventInfo
   skippedByEarnings: number
   skippedByFomc: number
+  skippedByLiquidity: number
 }
 
 export type EntryDetail = {
@@ -178,6 +180,7 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
   let exitsClosed   = 0
   let skippedByEarnings = 0
   let skippedByFomc     = 0
+  let skippedByLiquidity = 0
 
   // ── Eventos macro: FOMC en próximos 2 días bloquea aperturas ────────────
   const macroEvent = await hasEventInWindow(db, today, 1)
@@ -212,13 +215,17 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
   }
   const snapshots = Array.from(latestBySymbol.values())
 
-  // ── Liquidez (price_summary_daily.dollar_volume_20d) por symbol_id
+  // ── Liquidez (price_summary_daily) por symbol_id
   const { data: liqRaw } = await db
     .from("price_summary_daily")
-    .select("symbol_id, dollar_volume_20d, close")
-  const liqBySymbol = new Map<string, { dvol: number | null; close: number | null }>()
+    .select("symbol_id, dollar_volume_20d, avg_volume_20d, close")
+  const liqBySymbol = new Map<string, { dvol: number | null; avgVol: number | null; close: number | null }>()
   for (const r of liqRaw ?? []) {
-    liqBySymbol.set(r.symbol_id, { dvol: r.dollar_volume_20d as number | null, close: r.close as number | null })
+    liqBySymbol.set(r.symbol_id, {
+      dvol:   r.dollar_volume_20d as number | null,
+      avgVol: r.avg_volume_20d as number | null,
+      close:  r.close as number | null,
+    })
   }
 
   // ── BUY: por símbolo × regla
@@ -235,9 +242,19 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
     // earnings_within_5d se calcula con ventana más amplia (5 días) para tag/análisis
     const earningsWithin5d = isNearEarnings(snap.payload, today, 5)
 
+    const liq = liqBySymbol.get(snap.symbol_id)
+
+    // Elegibilidad: liquidez + volumen + opciones. Un símbolo no negociable
+    // se salta antes de gastar evaluación de condiciones.
+    const elig = checkEligibility({
+      dollarVolume20d: liq?.dvol ?? null,
+      avgVolume20d:    liq?.avgVol ?? null,
+      payload:         snap.payload,
+    })
+    if (!elig.eligible) { skippedByLiquidity++; continue }
+
     const sectorYahoo = snap.payload.sector
     const rot = rotationFor(sectorYahoo, macroPhase, rotationMap)
-    const liq = liqBySymbol.get(snap.symbol_id)
     const filterCtx: FilterCtx = {
       rotation_status:   rot.status,
       m6_regime:         m6Regime ?? snap.payload.m6Regime ?? null,
@@ -418,5 +435,6 @@ export async function runEngine(deps: EngineDeps): Promise<EngineResult> {
     macroEvent,
     skippedByEarnings,
     skippedByFomc,
+    skippedByLiquidity,
   }
 }
