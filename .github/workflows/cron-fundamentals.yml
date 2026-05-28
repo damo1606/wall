@@ -1,0 +1,78 @@
+name: Fundamentales + opciones (cron diario)
+
+# Puebla fundamentals_snapshots, income_metrics, company_profile y option_chains.
+# Datos que no cambian intradía → 1 corrida al día basta. Separado del snapshot
+# para no concentrar el rate budget de Yahoo.
+
+on:
+  schedule:
+    # 03:00 UTC lun-vie (22:00 🇪🇨 Quito del día anterior). Off-peak Yahoo.
+    - cron: '0 3 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Símbolos por invocación'
+        required: false
+        default: '60'
+
+concurrency:
+  group: cron-fundamentals
+  cancel-in-progress: false
+
+jobs:
+  fundamentals:
+    name: Loop /api/cron/fundamentals
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Iterar batches de fundamentales
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT:    https://wall-livid.vercel.app/api/cron/fundamentals
+          BATCH_SIZE:  ${{ inputs.batch_size || '60' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then echo "::error::CRON_SECRET no configurado"; exit 1; fi
+          BATCH_START=0; TOTAL=0; N=0
+          while true; do
+            N=$((N+1))
+            URL="${ENDPOINT}?batch_start=${BATCH_START}&batch_size=${BATCH_SIZE}"
+            STATUS=$(curl -sS -X GET "$URL" -H "Authorization: Bearer $CRON_SECRET" \
+              -H "User-Agent: gha-fundamentals" --max-time 320 -o /tmp/f.json -w "%{http_code}")
+            echo "Batch #$N HTTP $STATUS"; cat /tmp/f.json; echo
+            if [ "$STATUS" != "200" ]; then echo "::error::batch #$N falló"; exit 1; fi
+            DONE=$(grep -o '"done":[a-z]*' /tmp/f.json | head -1 | cut -d: -f2)
+            NEXT=$(grep -o '"next_batch_start":[0-9]*' /tmp/f.json | head -1 | cut -d: -f2)
+            if [ "$DONE" = "true" ]; then echo "✓ fundamentales completos"; break; fi
+            if [ -z "$NEXT" ]; then echo "::warning::sin next; corto"; break; fi
+            BATCH_START=$NEXT; sleep 8
+          done
+
+  option-chains:
+    name: Loop /api/cron/option-chains
+    needs: fundamentals
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Iterar batches de option chains
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT:    https://wall-livid.vercel.app/api/cron/option-chains
+          BATCH_SIZE:  '40'
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then echo "::error::CRON_SECRET no configurado"; exit 1; fi
+          BATCH_START=0; N=0
+          while true; do
+            N=$((N+1))
+            URL="${ENDPOINT}?batch_start=${BATCH_START}&batch_size=${BATCH_SIZE}"
+            STATUS=$(curl -sS -X GET "$URL" -H "Authorization: Bearer $CRON_SECRET" \
+              -H "User-Agent: gha-option-chains" --max-time 320 -o /tmp/o.json -w "%{http_code}")
+            echo "Batch #$N HTTP $STATUS"; cat /tmp/o.json; echo
+            if [ "$STATUS" != "200" ]; then echo "::error::batch #$N falló"; exit 1; fi
+            DONE=$(grep -o '"done":[a-z]*' /tmp/o.json | head -1 | cut -d: -f2)
+            NEXT=$(grep -o '"next_batch_start":[0-9]*' /tmp/o.json | head -1 | cut -d: -f2)
+            if [ "$DONE" = "true" ]; then echo "✓ option chains completas"; break; fi
+            if [ -z "$NEXT" ]; then echo "::warning::sin next; corto"; break; fi
+            BATCH_START=$NEXT; sleep 8
+          done

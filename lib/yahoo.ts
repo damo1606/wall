@@ -280,6 +280,15 @@ export type StockData = {
 
   // Calendario
   earningsDate?: string   // "2026-04-30" — próxima fecha de earnings (puede ser undefined)
+
+  // Perfil de empresa (assetProfile) — para company_profile
+  description?: string    // longBusinessSummary
+  employees?: number      // fullTimeEmployees
+  country?: string
+  city?: string
+  ceo?: string            // primer officer
+  website?: string
+  founded?: number        // no lo da Yahoo directo — queda undefined salvo que se derive
 }
 
 function buildUrl(symbol: string, crumb: string, calendar = false) {
@@ -440,6 +449,8 @@ export async function fetchStockData(symbol: string, calendar = false): Promise<
 
     const compositeScore = Math.round(valueScore * 0.55 + qualityScore * 0.45)
 
+    const firstOfficer = Array.isArray(profile.companyOfficers) ? profile.companyOfficers[0] : undefined
+
     return {
       symbol,
       company:   price.longName ?? price.shortName ?? symbol,
@@ -447,6 +458,14 @@ export async function fetchStockData(symbol: string, calendar = false): Promise<
       industry:  profile.industry ?? "",
       marketCap: price.marketCap?.raw ?? summary.marketCap?.raw ?? 0,
       beta:      summary.beta?.raw ?? 0,
+
+      // Perfil (assetProfile)
+      description: profile.longBusinessSummary ?? undefined,
+      employees:   profile.fullTimeEmployees ?? undefined,
+      country:     profile.country ?? undefined,
+      city:        profile.city ?? undefined,
+      ceo:         firstOfficer?.name ?? undefined,
+      website:     profile.website ?? undefined,
 
       currentPrice,
       high52w,

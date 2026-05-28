@@ -174,6 +174,40 @@ export async function GET(req: NextRequest) {
       else       { rowsInserted += methodologyRows.length }
     }
 
+    // ── valuation_scores: veredicto persistido por símbolo (tabla limpia
+    //    consultable, sin parsear el payload crudo de methodology_snapshots)
+    const valuationRows = rows
+      .map(r => {
+        const ticker = r.symbol as string
+        const symbolId = ticker ? symbolMap.get(ticker) : undefined
+        if (!symbolId) return null
+        const score = (r.convictionScore as number | undefined) ?? null
+        if (score == null) return null
+        return {
+          methodology: "M6" as const,
+          symbol_id: symbolId,
+          score,
+          components: {
+            verdict:          r.verdict ?? null,
+            soreGate:         r.soreGate ?? null,
+            soreCSS:          r.soreCSS ?? null,
+            buyScore:         r.buyScore ?? null,
+            grade:            r.grade ?? null,
+            dropFrom52w:      r.dropFrom52w ?? null,
+            discountToGraham: r.discountToGraham ?? null,
+            m6Regime:         r.m6Regime ?? m6Regime ?? null,
+          } as never,
+          cron_run_id: runId,
+        }
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+
+    if (valuationRows.length > 0) {
+      const { error } = await db.from("valuation_scores").insert(valuationRows)
+      if (error) { rowsFailed += valuationRows.length; errors.push(`valuation: ${error.message}`) }
+      else       { rowsInserted += valuationRows.length }
+    }
+
     // ── Motor de Oportunidades: evaluación de alertas ───────────────────────
     try {
       const alertResult = await evaluateAndStoreAlerts(
