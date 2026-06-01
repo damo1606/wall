@@ -8,6 +8,7 @@ export const ACCIONES: NavPage[] = [
   { href: "/oportunidades", label: "Oportunidades" },
   { href: "/screener",     label: "Screener" },
   { href: "/valoracion",   label: "Valoración" },
+  { href: "/fundamentales", label: "Fundamentales" },
   { href: "/ciclos",       label: "Ciclos" },
   { href: "/sectores",     label: "Sectores" },
   { href: "/senales",      label: "Señales" },
@@ -28,6 +29,7 @@ export const INSTITUCIONAL: NavPage[] = [
   { href: "/scanner",       label: "Scanner" },
   { href: "/scanner-pro",   label: "Scanner Pro" },
   { href: "/rotacion",      label: "Rotación" },
+  { href: "/etfs",          label: "ETFs e Índices" },
   { href: "/data-quality",  label: "Data Quality" },
 ]
 
