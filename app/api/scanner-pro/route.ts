@@ -5,7 +5,10 @@ import { getCrumb, fetchStockData } from "@/lib/yahoo";
 // lo llama internamente, recibe una versión cacheada antigua (~5 filas) en vez
 // de la respuesta fresca (~99 filas).
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// 300s = igual que las rutas de cron (fundamentals, option-chains). El screener
+// usa pool(3, 3s) para no rate-limitearse contra Yahoo, así que ~100 símbolos
+// tardan ~100s en pasar por fetchStockData. UI con limit=20 default termina en ~20s.
+export const maxDuration = 300;
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS } from "@/lib/symbols";
 import { computeAnalysis } from "@/lib/gex";
 import { computeAnalysis2 } from "@/lib/gex2";
@@ -372,6 +375,29 @@ async function analyzeTickerFull(
   return { spot, m1, m2, m3, m5, m6, m7 };
 }
 
+// ── Pool helper para el screener fundamental ──────────────────────────────────
+// Mismo patrón que app/api/cron/fundamentals/route.ts y option-chains.
+// Lanzar 100 fetchStockData en paralelo hace que Yahoo rate-limitee ~96 de ellas
+// silenciosamente (fetchStockData devuelve null, el .filter las traga sin log).
+// Con 3 workers + 3s entre llamadas Yahoo deja pasar todo.
+const SCREENER_CONCURRENCY = 3
+const SCREENER_RATE_LIMIT_MS = 3000
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+async function pool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length)
+  let i = 0
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (true) {
+      const idx = i++
+      if (idx >= items.length) break
+      out[idx] = await fn(items[idx])
+      await sleep(SCREENER_RATE_LIMIT_MS)
+    }
+  }))
+  return out
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
@@ -388,11 +414,15 @@ export async function GET(request: NextRequest) {
     SP500_SYMBOLS
   ).slice(0, limit);
 
-  const screenerResults = await Promise.allSettled(symbols.map(s => fetchStockData(s)));
-  const fundamentals: any[] = screenerResults
-    .filter((r): r is PromiseFulfilledResult<NonNullable<Awaited<ReturnType<typeof fetchStockData>>>> =>
-      r.status === "fulfilled" && r.value !== null)
-    .map(r => r.value);
+  // Rate-limit el screener (Yahoo rate-limitea fetches en paralelo masivos y
+  // los devuelve como null sin error). pool(3, 3s) es el patrón ya probado
+  // en los crons. fetchStockData puede devolver null por símbolo no encontrado
+  // o por fallo de Yahoo; ambos se filtran.
+  const screenerResults = await pool(symbols, SCREENER_CONCURRENCY, fetchStockData)
+  const fundamentals = screenerResults.filter(
+    (r): r is NonNullable<typeof r> => r !== null
+  )
+  console.log(`[scanner-pro] screener: ${symbols.length} pedidos → ${fundamentals.length} sobrevivieron`)
 
   // 2. Score + filter
   const { scoreStock } = await import("@/lib/scoring");
