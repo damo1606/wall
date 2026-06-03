@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCrumb, fetchStockData } from "@/lib/yahoo";
+import { getCrumb } from "@/lib/yahoo";
+import { supabaseServer } from "@/lib/supabase";
+import type { StockData } from "@/lib/yahoo";
+import type { ScoreBreakdown } from "@/lib/scoring";
 
 // Sin esto Next.js trata el GET como static/cacheable y, cuando el cron snapshot
 // lo llama internamente, recibe una versión cacheada antigua (~5 filas) en vez
 // de la respuesta fresca (~99 filas).
 export const dynamic = "force-dynamic";
-// 300s = igual que las rutas de cron (fundamentals, option-chains). El screener
-// usa pool(3, 3s) para no rate-limitearse contra Yahoo, así que ~100 símbolos
-// tardan ~100s en pasar por fetchStockData. UI con limit=20 default termina en ~20s.
-export const maxDuration = 300;
+// Phase B: el screener fundamental ahora lee de valuation_scores (methodology=
+// "buyScore"), no llama a Yahoo. Solo queda Yahoo para la cadena de opciones
+// (M1-M5/SORE), que sí debe ser intradía. ~10s total para limit=100.
+export const maxDuration = 60;
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS } from "@/lib/symbols";
 import { computeAnalysis } from "@/lib/gex";
 import { computeAnalysis2 } from "@/lib/gex2";
@@ -375,29 +378,6 @@ async function analyzeTickerFull(
   return { spot, m1, m2, m3, m5, m6, m7 };
 }
 
-// ── Pool helper para el screener fundamental ──────────────────────────────────
-// Mismo patrón que app/api/cron/fundamentals/route.ts y option-chains.
-// Lanzar 100 fetchStockData en paralelo hace que Yahoo rate-limitee ~96 de ellas
-// silenciosamente (fetchStockData devuelve null, el .filter las traga sin log).
-// Con 3 workers + 3s entre llamadas Yahoo deja pasar todo.
-const SCREENER_CONCURRENCY = 3
-const SCREENER_RATE_LIMIT_MS = 3000
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
-
-async function pool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out: R[] = new Array(items.length)
-  let i = 0
-  await Promise.all(Array.from({ length: concurrency }, async () => {
-    while (true) {
-      const idx = i++
-      if (idx >= items.length) break
-      out[idx] = await fn(items[idx])
-      await sleep(SCREENER_RATE_LIMIT_MS)
-    }
-  }))
-  return out
-}
-
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
@@ -414,23 +394,39 @@ export async function GET(request: NextRequest) {
     SP500_SYMBOLS
   ).slice(0, limit);
 
-  // Rate-limit el screener (Yahoo rate-limitea fetches en paralelo masivos y
-  // los devuelve como null sin error). pool(3, 3s) es el patrón ya probado
-  // en los crons. fetchStockData puede devolver null por símbolo no encontrado
-  // o por fallo de Yahoo; ambos se filtran.
-  const screenerResults = await pool(symbols, SCREENER_CONCURRENCY, fetchStockData)
-  const fundamentals = screenerResults.filter(
-    (r): r is NonNullable<typeof r> => r !== null
-  )
-  console.log(`[scanner-pro] screener: ${symbols.length} pedidos → ${fundamentals.length} sobrevivieron`)
-
-  // 2. Score + filter
-  const { scoreStock } = await import("@/lib/scoring");
-  const scored = fundamentals
-    .map((s: any) => ({ stock: s, score: scoreStock(s) }))
-    .filter(({ score }) => score.buyScore >= minBuyScore)
-    .sort((a, b) => b.score.buyScore - a.score.buyScore)
-    .slice(0, limit);
+  // Phase B: screener fundamental desde DB persistido (no Yahoo).
+  // El cron fundamentals_daily escribe valuation_scores con methodology="buyScore"
+  // y components = { stock: StockData, score: ScoreBreakdown }. Aquí solo leemos
+  // el último snapshot por símbolo y filtramos por minBuyScore.
+  const db = supabaseServer()
+  const { data: syms } = await db.from("symbols")
+    .select("id, ticker")
+    .in("ticker", symbols)
+    .eq("is_active", true)
+    .eq("asset_type", "stock")
+  const symbolIds = (syms ?? []).map(s => s.id)
+  let scored: { stock: StockData; score: ScoreBreakdown }[] = []
+  if (symbolIds.length > 0) {
+    const cutoff = new Date(Date.now() - 5 * 86_400_000).toISOString()
+    const { data: scoreRows } = await db.from("valuation_scores")
+      .select("symbol_id, components, taken_at")
+      .eq("methodology", "buyScore")
+      .gte("taken_at", cutoff)
+      .in("symbol_id", symbolIds)
+      .order("taken_at", { ascending: false })
+    // dedupe: la fila más reciente por symbol_id
+    const latestBySymbol = new Map<string, { stock: StockData; score: ScoreBreakdown }>()
+    for (const r of scoreRows ?? []) {
+      if (latestBySymbol.has(r.symbol_id)) continue
+      const c = r.components as unknown as { stock?: StockData; score?: ScoreBreakdown } | null
+      if (c?.stock && c?.score) latestBySymbol.set(r.symbol_id, { stock: c.stock, score: c.score })
+    }
+    scored = [...latestBySymbol.values()]
+      .filter(({ score }) => score.buyScore >= minBuyScore)
+      .sort((a, b) => b.score.buyScore - a.score.buyScore)
+      .slice(0, limit)
+  }
+  console.log(`[scanner-pro] screener DB: ${symbolIds.length} símbolos resueltos → ${scored.length} pasaron buyScore≥${minBuyScore}`)
 
   if (scored.length === 0) return NextResponse.json({ rows: [], total: 0 });
 

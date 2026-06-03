@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
 import { fetchStockData } from "@/lib/yahoo"
+import { scoreStock } from "@/lib/scoring"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
   }
 
   const takenAt = new Date().toISOString()
-  let marketOk = 0, quarterlyOk = 0, incomeOk = 0, profileOk = 0
+  let marketOk = 0, quarterlyOk = 0, incomeOk = 0, profileOk = 0, scoreOk = 0
   let fetchFailed = 0, insertErrors = 0
   const failedTickers: string[] = []
   const insertErrMsgs: string[] = []
@@ -123,10 +124,24 @@ export async function GET(req: NextRequest) {
     } as never, { onConflict: "symbol_id" })
     if (!pErr) profileOk++
     else noteErr(s.ticker, "profile", pErr)
+
+    // valuation_scores (methodology=buyScore) — cachea el score computado +
+    // los campos de StockData que el scanner-pro necesita. Esto evita que
+    // scanner-pro tenga que hammear Yahoo en vivo: lee de aquí en su lugar.
+    const score = scoreStock(d)
+    const { error: sErr } = await db.from("valuation_scores").insert({
+      methodology: "buyScore",
+      symbol_id: s.id,
+      score: score.buyScore,
+      components: { stock: d, score } as never,
+      cron_run_id: runId,
+    } as never)
+    if (!sErr) scoreOk++
+    else noteErr(s.ticker, "score", sErr)
   })
 
   const durationMs = Date.now() - startedAt
-  const rowsInserted = marketOk + quarterlyOk + incomeOk + profileOk
+  const rowsInserted = marketOk + quarterlyOk + incomeOk + profileOk + scoreOk
   const hadProblems = fetchFailed > 0 || insertErrors > 0
   const status: "success" | "partial" | "failed" =
     !hadProblems ? "success" : (rowsInserted > 0 ? "partial" : "failed")
@@ -147,7 +162,7 @@ export async function GET(req: NextRequest) {
     ok: status !== "failed", runId, status,
     batch_start: batchStart, batch_size: batchSize,
     processed: syms.length,
-    market_ok: marketOk, quarterly_ok: quarterlyOk, income_ok: incomeOk, profile_ok: profileOk,
+    market_ok: marketOk, quarterly_ok: quarterlyOk, income_ok: incomeOk, profile_ok: profileOk, score_ok: scoreOk,
     fetch_failed: fetchFailed, insert_errors: insertErrors, duration_ms: durationMs,
     next_batch_start: done ? null : batchStart + batchSize, done,
   })
