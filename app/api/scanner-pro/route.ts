@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCrumb } from "@/lib/yahoo";
+import { getCrumb, fetchStockData } from "@/lib/yahoo";
 import { supabaseServer } from "@/lib/supabase";
 import type { StockData } from "@/lib/yahoo";
 import type { ScoreBreakdown } from "@/lib/scoring";
@@ -8,10 +8,11 @@ import type { ScoreBreakdown } from "@/lib/scoring";
 // lo llama internamente, recibe una versión cacheada antigua (~5 filas) en vez
 // de la respuesta fresca (~99 filas).
 export const dynamic = "force-dynamic";
-// Phase B: el screener fundamental ahora lee de valuation_scores (methodology=
-// "buyScore"), no llama a Yahoo. Solo queda Yahoo para la cadena de opciones
-// (M1-M5/SORE), que sí debe ser intradía. ~10s total para limit=100.
-export const maxDuration = 60;
+// Phase B: el screener fundamental lee de valuation_scores (methodology="buyScore").
+// Si esa tabla viene vacía (cron pendiente, deploy reciente, transiente) cae a
+// Phase A: pool(3, 3s) directo a Yahoo. Por eso maxDuration=300 — el fallback
+// puede tomar ~100s y necesitamos margen.
+export const maxDuration = 300;
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS } from "@/lib/symbols";
 import { computeAnalysis } from "@/lib/gex";
 import { computeAnalysis2 } from "@/lib/gex2";
@@ -378,6 +379,27 @@ async function analyzeTickerFull(
   return { spot, m1, m2, m3, m5, m6, m7 };
 }
 
+// ── Pool helper para el fallback a Yahoo en vivo ──────────────────────────────
+// Solo se usa cuando valuation_scores viene vacío (buyScore aún no poblado).
+// Mismo patrón que en los crons: 3 workers, 3s entre llamadas.
+const SCREENER_CONCURRENCY = 3
+const SCREENER_RATE_LIMIT_MS = 3000
+const _sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+async function pool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length)
+  let i = 0
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (true) {
+      const idx = i++
+      if (idx >= items.length) break
+      out[idx] = await fn(items[idx])
+      await _sleep(SCREENER_RATE_LIMIT_MS)
+    }
+  }))
+  return out
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
@@ -394,10 +416,10 @@ export async function GET(request: NextRequest) {
     SP500_SYMBOLS
   ).slice(0, limit);
 
-  // Phase B: screener fundamental desde DB persistido (no Yahoo).
-  // El cron fundamentals_daily escribe valuation_scores con methodology="buyScore"
-  // y components = { stock: StockData, score: ScoreBreakdown }. Aquí solo leemos
-  // el último snapshot por símbolo y filtramos por minBuyScore.
+  // Phase B con fallback: intentamos leer valuation_scores (methodology="buyScore").
+  // Si viene vacío (cron pendiente, deploy reciente, constraint roto, etc.) caemos
+  // al patrón de Phase A: pool(3, 3s) directo a Yahoo. Eso hace el sistema
+  // resiliente a transitorios sin perder cobertura.
   const db = supabaseServer()
   const { data: syms } = await db.from("symbols")
     .select("id, ticker")
@@ -414,7 +436,6 @@ export async function GET(request: NextRequest) {
       .gte("taken_at", cutoff)
       .in("symbol_id", symbolIds)
       .order("taken_at", { ascending: false })
-    // dedupe: la fila más reciente por symbol_id
     const latestBySymbol = new Map<string, { stock: StockData; score: ScoreBreakdown }>()
     for (const r of scoreRows ?? []) {
       if (latestBySymbol.has(r.symbol_id)) continue
@@ -426,7 +447,24 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.score.buyScore - a.score.buyScore)
       .slice(0, limit)
   }
-  console.log(`[scanner-pro] screener DB: ${symbolIds.length} símbolos resueltos → ${scored.length} pasaron buyScore≥${minBuyScore}`)
+
+  if (scored.length === 0) {
+    // Fallback Phase A: nadie pobló valuation_scores aún. Hacemos el screener
+    // contra Yahoo con rate-limit. Es lento (~100s) pero el sistema sigue
+    // funcionando sin esperar al cron.
+    console.log(`[scanner-pro] DB vacío para buyScore — fallback a Yahoo con pool(3, 3s)`)
+    const screenerResults = await pool(symbols, SCREENER_CONCURRENCY, fetchStockData)
+    const fundamentals = screenerResults.filter((r): r is NonNullable<typeof r> => r !== null)
+    const { scoreStock } = await import("@/lib/scoring")
+    scored = fundamentals
+      .map(s => ({ stock: s, score: scoreStock(s) }))
+      .filter(({ score }) => score.buyScore >= minBuyScore)
+      .sort((a, b) => b.score.buyScore - a.score.buyScore)
+      .slice(0, limit)
+    console.log(`[scanner-pro] fallback: ${symbols.length} pedidos → ${fundamentals.length} sobrevivieron Yahoo → ${scored.length} pasaron buyScore≥${minBuyScore}`)
+  } else {
+    console.log(`[scanner-pro] DB: ${symbolIds.length} símbolos resueltos → ${scored.length} pasaron buyScore≥${minBuyScore}`)
+  }
 
   if (scored.length === 0) return NextResponse.json({ rows: [], total: 0 });
 
