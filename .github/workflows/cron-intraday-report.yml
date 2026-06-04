@@ -1,0 +1,61 @@
+name: Reporte intradía (4 momentos)
+
+# Postea a Discord un snapshot del sistema (macro, top picks, SORE, triggers,
+# distribución) en 4 momentos clave del día de trading. Lunes-viernes únicamente.
+# El endpoint /api/report/intraday computa el reporte y lo postea al webhook.
+#
+# Horarios (UTC → Quito → ET):
+#   10:30 UTC → 05:30 Quito → 06:30 ET  (PREP   — 3h antes de apertura)
+#   13:00 UTC → 08:00 Quito → 09:00 ET  (OPEN-30 — 30min antes de apertura)
+#   16:00 UTC → 11:00 Quito → 12:00 ET  (LUNCH   — almuerzo NY)
+#   19:30 UTC → 14:30 Quito → 15:30 ET  (CLOSE-30 — 30min antes del cierre)
+
+on:
+  schedule:
+    - cron: '30 10 * * 1-5'   # PREP
+    - cron: '0 13 * * 1-5'    # OPEN-30
+    - cron: '0 16 * * 1-5'    # LUNCH
+    - cron: '30 19 * * 1-5'   # CLOSE-30
+  workflow_dispatch:
+    inputs:
+      moment:
+        description: 'Momento a forzar (vacío = derivar de la hora UTC actual)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - PREP
+          - OPEN-30
+          - LUNCH
+          - CLOSE-30
+
+concurrency:
+  group: cron-intraday-report
+  cancel-in-progress: false
+
+jobs:
+  post-report:
+    name: Postear reporte a Discord
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Llamar /api/report/intraday
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT:    https://wall-livid.vercel.app/api/report/intraday
+          MOMENT:      ${{ inputs.moment }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then echo "::error::CRON_SECRET no configurado"; exit 1; fi
+          QUERY=""
+          if [ -n "${MOMENT:-}" ]; then QUERY="?moment=${MOMENT}"; fi
+          URL="${ENDPOINT}${QUERY}"
+          echo "Llamando $URL"
+          STATUS=$(curl -sS -X GET "$URL" -H "Authorization: Bearer $CRON_SECRET" \
+            -H "User-Agent: gha-intraday-report" --max-time 280 \
+            -o /tmp/r.json -w "%{http_code}")
+          echo "HTTP $STATUS"
+          cat /tmp/r.json
+          echo
+          if [ "$STATUS" != "200" ]; then echo "::error::reporte falló"; exit 1; fi
