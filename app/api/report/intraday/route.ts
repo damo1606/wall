@@ -13,14 +13,6 @@ const MOMENTS = {
 } as const
 type Moment = keyof typeof MOMENTS
 
-// Color de embed por momento (decimal Discord colors)
-const COLORS: Record<Moment, number> = {
-  "PREP":     0x4A90E2, // azul calmo
-  "OPEN-30":  0xF5A623, // ámbar (atención)
-  "LUNCH":    0x9B9B9B, // gris (revisión)
-  "CLOSE-30": 0xD0021B, // rojo (urgencia)
-}
-
 // Deriva el moment del UTC actual si no viene como param.
 // PREP=10:30, OPEN-30=13:00, LUNCH=16:00, CLOSE-30=19:30 UTC (lun-vie).
 function deriveMoment(d = new Date()): Moment {
@@ -59,15 +51,24 @@ function fmtTime(d: Date) {
   return { quito, utc, et }
 }
 
-async function postDiscord(webhook: string, payload: object) {
-  const r = await fetch(webhook, {
+// Telegram HTML solo permite tags específicos. Escapamos &, <, > en texto dinámico
+// para que tickers o sectores con caracteres raros no rompan el parse.
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+async function postTelegram(botToken: string, chatId: string, htmlText: string) {
+  const r = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: htmlText,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    }),
   })
   if (!r.ok) {
     const text = await r.text().catch(() => "")
-    throw new Error(`Discord webhook ${r.status}: ${text.slice(0, 200)}`)
+    throw new Error(`Telegram sendMessage ${r.status}: ${text.slice(0, 300)}`)
   }
 }
 
@@ -77,8 +78,11 @@ export async function GET(req: NextRequest) {
   if (req.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-  const webhook = process.env.DISCORD_WEBHOOK_URL
-  if (!webhook) return NextResponse.json({ error: "DISCORD_WEBHOOK_URL no configurada" }, { status: 500 })
+  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  const chatId = process.env.TELEGRAM_CHAT_ID
+  if (!botToken || !chatId) {
+    return NextResponse.json({ error: "TELEGRAM_BOT_TOKEN y/o TELEGRAM_CHAT_ID no configurados" }, { status: 500 })
+  }
 
   const url = new URL(req.url)
   const momentParam = (url.searchParams.get("moment") ?? "").toUpperCase()
@@ -129,56 +133,67 @@ export async function GET(req: NextRequest) {
   const now = new Date()
   const { quito, utc, et } = fmtTime(now)
 
-  // 4. Compose Discord embed
-  const fmtRow = (r: ScannerRow) =>
-    `\`${r.symbol.padEnd(5)}\` ${(r.sector ?? "—").slice(0, 16).padEnd(16)} buy=${String(r.buyScore).padStart(2)} conv=${r.convictionScore.toFixed(0)} · ${r.verdict.padEnd(11)} · SORE ${r.soreGate}`
-  const topConvStr = topConv.length ? topConv.map(fmtRow).join("\n") : "_sin datos_"
-
+  // 4. Compose Telegram HTML message
+  const fmtConvRow = (r: ScannerRow) => {
+    const sym = esc(r.symbol.padEnd(5))
+    const sec = esc((r.sector ?? "—").slice(0, 16).padEnd(16))
+    return `<code>${sym}</code> ${sec} buy=${String(r.buyScore).padStart(2)} conv=${r.convictionScore.toFixed(0)} · ${esc(r.verdict.padEnd(11))} · SORE ${r.soreGate}`
+  }
   const fmtBuyRow = (r: ScannerRow) => {
+    const sym = esc(r.symbol.padEnd(5))
     const pe = r.pe ? r.pe.toFixed(1) : "—"
     const roe = r.roe ? (r.roe * 100).toFixed(0) + "%" : "—"
     const graham = pct(r.discountToGraham)
-    return `\`${r.symbol.padEnd(5)}\` buy=${r.buyScore} ${r.grade ?? "—"} · P/E ${pe} · ROE ${roe} · Graham ${graham}`
-  }
-  const topBuyStr = topBuy.length ? topBuy.map(fmtBuyRow).join("\n") : "_sin datos_"
-
-  const goSoreStr = goSore.length
-    ? goSore.map(r => `\`${r.symbol}\` CSS=${r.soreCSS} → ${r.soreStrategy}`).join("\n")
-    : "_sin oportunidades (régimen no favorable)_"
-
-  const triggersStr = `OPEN ahora: **${openNow}** · abiertas hoy: **${openedToday}** · cerradas hoy: **${closedToday}**`
-
-  const distStr = `STRONG BUY **${verdicts["STRONG BUY"] ?? 0}** · BUY **${verdicts.BUY ?? 0}** · WATCH **${verdicts.WATCH ?? 0}** · NEUTRAL **${verdicts.NEUTRAL ?? 0}**\nSORE GO **${sores.GO ?? 0}** · WAIT **${sores.WAIT ?? 0}** · AVOID **${sores.AVOID ?? 0}**`
-
-  const macroStr = `Régimen: **${m6Regime}** · VIX **${m6Vix?.toFixed(2) ?? "—"}** · ${rows.length} símbolos analizados`
-
-  const embed = {
-    title: `${mt.emoji} WALL — ${mt.label}`,
-    description: `**${mt.subtitle}** · ${quito} Quito · ${utc} UTC · ${et} ET`,
-    color: COLORS[moment],
-    fields: [
-      { name: "📊 Macro", value: macroStr, inline: false },
-      { name: "🎯 Top 5 Convicción", value: "```\n" + topConv.map(fmtRow).join("\n") + "\n```", inline: false },
-      { name: "💎 Top 3 Fundamental", value: "```\n" + topBuy.map(fmtBuyRow).join("\n") + "\n```", inline: false },
-      { name: "💰 SORE GO", value: goSoreStr, inline: false },
-      { name: "🚦 Triggers", value: triggersStr, inline: false },
-      { name: "📈 Distribución", value: distStr, inline: false },
-    ],
-    timestamp: now.toISOString(),
-    footer: { text: "wall-livid.vercel.app/sore" },
+    return `<code>${sym}</code> buy=${r.buyScore} ${esc(r.grade ?? "—")} · P/E ${pe} · ROE ${roe} · Graham ${esc(graham)}`
   }
 
-  // Fallback: si rows está vacío, no postear top conviction code-block (vacío)
-  if (rows.length === 0) {
-    embed.fields[1].value = "_scanner-pro no devolvió datos_"
-    embed.fields[2].value = "_scanner-pro no devolvió datos_"
-    embed.fields[5].value = "_sin datos_"
-  }
+  const topConvBlock = rows.length === 0
+    ? "<i>scanner-pro no devolvió datos</i>"
+    : `<pre>${topConv.map(fmtConvRow).join("\n")}</pre>`
+
+  const topBuyBlock = rows.length === 0
+    ? "<i>scanner-pro no devolvió datos</i>"
+    : `<pre>${topBuy.map(fmtBuyRow).join("\n")}</pre>`
+
+  const goSoreBlock = goSore.length
+    ? goSore.map(r => `<code>${esc(r.symbol)}</code> CSS=${r.soreCSS} → ${esc(r.soreStrategy)}`).join("\n")
+    : "<i>sin oportunidades (régimen no favorable)</i>"
+
+  const triggersBlock = `OPEN ahora: <b>${openNow}</b> · abiertas hoy: <b>${openedToday}</b> · cerradas hoy: <b>${closedToday}</b>`
+
+  const distBlock = rows.length === 0
+    ? "<i>sin datos</i>"
+    : `STRONG BUY <b>${verdicts["STRONG BUY"] ?? 0}</b> · BUY <b>${verdicts.BUY ?? 0}</b> · WATCH <b>${verdicts.WATCH ?? 0}</b> · NEUTRAL <b>${verdicts.NEUTRAL ?? 0}</b>\nSORE GO <b>${sores.GO ?? 0}</b> · WAIT <b>${sores.WAIT ?? 0}</b> · AVOID <b>${sores.AVOID ?? 0}</b>`
+
+  const macroBlock = `Régimen: <b>${esc(m6Regime)}</b> · VIX <b>${m6Vix?.toFixed(2) ?? "—"}</b> · ${rows.length} símbolos analizados`
+
+  const html = [
+    `${mt.emoji} <b>WALL — ${mt.label}</b>`,
+    `<i>${esc(mt.subtitle)} · ${quito} Quito · ${utc} UTC · ${et} ET</i>`,
+    ``,
+    `📊 <b>Macro</b>`,
+    macroBlock,
+    ``,
+    `🎯 <b>Top 5 Convicción</b>`,
+    topConvBlock,
+    `💎 <b>Top 3 Fundamental</b>`,
+    topBuyBlock,
+    `💰 <b>SORE GO</b>`,
+    goSoreBlock,
+    ``,
+    `🚦 <b>Triggers</b>`,
+    triggersBlock,
+    ``,
+    `📈 <b>Distribución</b>`,
+    distBlock,
+    ``,
+    `<a href="https://wall-livid.vercel.app/sore">📊 Abrir dashboard</a>`,
+  ].join("\n")
 
   try {
-    await postDiscord(webhook, { embeds: [embed] })
+    await postTelegram(botToken, chatId, html)
   } catch (e) {
-    return NextResponse.json({ error: "Discord post failed", detail: String(e) }, { status: 500 })
+    return NextResponse.json({ error: "Telegram send failed", detail: String(e) }, { status: 500 })
   }
 
   return NextResponse.json({
