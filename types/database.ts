@@ -1153,6 +1153,69 @@ export type Database = {
           },
         ]
       }
+      insider_flows: {
+        Row: {
+          buy_usd: number
+          cron_run_id: string | null
+          id: string
+          last_trade_date: string | null
+          n_insiders: number
+          n_trades: number
+          net_flow_usd: number
+          period_end: string
+          period_start: string
+          sell_usd: number
+          source: string
+          symbol_id: string
+          taken_at: string
+        }
+        Insert: {
+          buy_usd: number
+          cron_run_id?: string | null
+          id?: string
+          last_trade_date?: string | null
+          n_insiders: number
+          n_trades: number
+          net_flow_usd: number
+          period_end: string
+          period_start: string
+          sell_usd: number
+          source?: string
+          symbol_id: string
+          taken_at?: string
+        }
+        Update: {
+          buy_usd?: number
+          cron_run_id?: string | null
+          id?: string
+          last_trade_date?: string | null
+          n_insiders?: number
+          n_trades?: number
+          net_flow_usd?: number
+          period_end?: string
+          period_start?: string
+          sell_usd?: number
+          source?: string
+          symbol_id?: string
+          taken_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "insider_flows_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "insider_flows_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       macro_events: {
         Row: {
           created_at: string
@@ -2052,6 +2115,7 @@ export type Database = {
       symbols: {
         Row: {
           asset_type: string
+          cik: string | null
           created_at: string
           delisted_at: string | null
           exchange: string | null
@@ -2066,6 +2130,7 @@ export type Database = {
         }
         Insert: {
           asset_type?: string
+          cik?: string | null
           created_at?: string
           delisted_at?: string | null
           exchange?: string | null
@@ -2080,6 +2145,7 @@ export type Database = {
         }
         Update: {
           asset_type?: string
+          cik?: string | null
           created_at?: string
           delisted_at?: string | null
           exchange?: string | null
