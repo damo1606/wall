@@ -1,10 +1,9 @@
 name: EDGAR (SEC) — crons
 
-# Workflows que pueblan tablas desde EDGAR/SEC.
-#
-# Por ahora: backfill manual de symbols.cik (one-shot al agregar símbolos
-# nuevos sin CIK). Próximo: insiders Form 4 (daily), short interest (biweekly),
-# 8-K eventos (3x/día).
+# Workflows que pueblan tablas desde EDGAR/SEC. Jobs activos:
+#   - cik-backfill (manual): hidrata symbols.cik
+#   - insiders (manual + diario 04:00 UTC): Form 4, agrega insider_flows
+# Próximos PRs: short interest (F2, quincenal), 8-K events (F3, 3x/día).
 
 on:
   workflow_dispatch:
@@ -12,19 +11,17 @@ on:
       job:
         description: 'Job a ejecutar'
         required: true
-        default: 'cik-backfill'
+        default: 'insiders'
         type: choice
         options:
           - cik-backfill
+          - insiders
   schedule:
-    # Insiders Form 4 — daily 04:00 UTC (próximo PR agregará el job)
-    # - cron: '0 4 * * 1-5'
-    # placeholder vacío para que el workflow exista; los schedules se
-    # añadirán cuando cada job esté listo.
-    - cron: '0 4 1 1 *'   # 1 vez al año (efectivamente desactivado hasta que añadamos jobs reales)
+    # Insiders Form 4 — diario 04:00 UTC (lun-vie)
+    - cron: '0 4 * * 1-5'
 
 concurrency:
-  group: cron-edgar-${{ github.event.inputs.job || 'scheduled' }}
+  group: cron-edgar-${{ github.event.inputs.job || github.event.schedule }}
   cancel-in-progress: false
 
 jobs:
@@ -47,3 +44,37 @@ jobs:
           echo "HTTP $STATUS"
           cat /tmp/r.json | jq . || cat /tmp/r.json
           if [ "$STATUS" != "200" ]; then echo "::error::backfill falló"; exit 1; fi
+
+  insiders:
+    name: EDGAR — insiders Form 4 (paginated)
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'insiders') ||
+      github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Iterar batches de /api/cron/edgar-insiders
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT:    https://wall-livid.vercel.app/api/cron/edgar-insiders
+          BATCH_SIZE:  '80'
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then echo "::error::CRON_SECRET no configurado"; exit 1; fi
+          BATCH_START=0; N=0
+          while true; do
+            N=$((N+1))
+            URL="${ENDPOINT}?batch_start=${BATCH_START}&batch_size=${BATCH_SIZE}"
+            STATUS=$(curl -sS -X GET "$URL" -H "Authorization: Bearer $CRON_SECRET" \
+              -H "User-Agent: gha-edgar-insiders" --max-time 290 \
+              -o /tmp/r.json -w "%{http_code}")
+            echo "Batch #$N HTTP $STATUS"
+            cat /tmp/r.json | jq . || cat /tmp/r.json
+            if [ "$STATUS" != "200" ]; then echo "::error::batch #$N falló"; exit 1; fi
+            DONE=$(jq -r '.done' /tmp/r.json)
+            NEXT=$(jq -r '.next_batch_start' /tmp/r.json)
+            if [ "$DONE" = "true" ]; then echo "✓ insiders completos"; break; fi
+            if [ "$NEXT" = "null" ] || [ -z "$NEXT" ]; then echo "::warning::sin next; corto"; break; fi
+            BATCH_START=$NEXT
+            sleep 5
+          done
