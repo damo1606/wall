@@ -1,0 +1,49 @@
+name: EDGAR (SEC) — crons
+
+# Workflows que pueblan tablas desde EDGAR/SEC.
+#
+# Por ahora: backfill manual de symbols.cik (one-shot al agregar símbolos
+# nuevos sin CIK). Próximo: insiders Form 4 (daily), short interest (biweekly),
+# 8-K eventos (3x/día).
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Job a ejecutar'
+        required: true
+        default: 'cik-backfill'
+        type: choice
+        options:
+          - cik-backfill
+  schedule:
+    # Insiders Form 4 — daily 04:00 UTC (próximo PR agregará el job)
+    # - cron: '0 4 * * 1-5'
+    # placeholder vacío para que el workflow exista; los schedules se
+    # añadirán cuando cada job esté listo.
+    - cron: '0 4 1 1 *'   # 1 vez al año (efectivamente desactivado hasta que añadamos jobs reales)
+
+concurrency:
+  group: cron-edgar-${{ github.event.inputs.job || 'scheduled' }}
+  cancel-in-progress: false
+
+jobs:
+  cik-backfill:
+    name: EDGAR — hidratar symbols.cik
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'cik-backfill'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Llamar /api/cron/edgar-cik-backfill
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT:    https://wall-livid.vercel.app/api/cron/edgar-cik-backfill
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then echo "::error::CRON_SECRET no configurado"; exit 1; fi
+          STATUS=$(curl -sS -X GET "$ENDPOINT" -H "Authorization: Bearer $CRON_SECRET" \
+            -H "User-Agent: gha-edgar-cik-backfill" --max-time 90 \
+            -o /tmp/r.json -w "%{http_code}")
+          echo "HTTP $STATUS"
+          cat /tmp/r.json | jq . || cat /tmp/r.json
+          if [ "$STATUS" != "200" ]; then echo "::error::backfill falló"; exit 1; fi
