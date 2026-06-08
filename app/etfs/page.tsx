@@ -99,7 +99,14 @@ export default function EtfsPage() {
           </div>
           {asOf && (
             <span className="text-xs font-semibold px-3 py-1.5 rounded border bg-gray-900 border-gray-700 text-gray-300">
-              datos al {new Date(asOf).toLocaleDateString("es", { year: "numeric", month: "short", day: "numeric" })}
+              datos al {(() => {
+                // asOf viene como "YYYY-MM-DD" desde price_summary_daily.as_of_date.
+                // new Date("YYYY-MM-DD") lo interpreta como midnight UTC → en
+                // timezones negativas (Quito UTC-5) se muestra como el día anterior.
+                // Parseamos explícitamente como fecha local para evitar el shift.
+                const [y, m, d] = asOf.split("-").map(Number)
+                return new Date(y, m - 1, d).toLocaleDateString("es", { year: "numeric", month: "short", day: "numeric" })
+              })()}
             </span>
           )}
         </div>
