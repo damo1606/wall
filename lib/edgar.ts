@@ -124,3 +124,11 @@ export async function fetchFilingDocument(
   if (!r.ok) return null
   return await r.text()
 }
+
+// SEC para Forms 3/4/5 expone primaryDocument apuntando a la versión HTML
+// renderizada (con prefijo xslF345XNN/). El XML crudo está en la misma carpeta
+// sin ese prefijo. Esta función traduce el primaryDocument al path del XML.
+// Ej: "xslF345X06/form4.xml" → "form4.xml"
+export function form345RawXmlPath(primaryDocument: string): string {
+  return primaryDocument.replace(/^xslF345X\d+\//, "")
+}

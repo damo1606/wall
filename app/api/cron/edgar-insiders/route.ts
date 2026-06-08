@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
-import { fetchSubmissions, fetchFilingDocument, pool, EDGAR_CONCURRENCY } from "@/lib/edgar"
+import { fetchSubmissions, fetchFilingDocument, form345RawXmlPath, pool, EDGAR_CONCURRENCY } from "@/lib/edgar"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -127,7 +127,9 @@ export async function GET(req: NextRequest) {
     const allTxns: Form4Txn[] = []
     for (const i of form4Indices) {
       try {
-        const doc = await fetchFilingDocument(cik, sub.recent.accessionNumber[i], sub.recent.primaryDocument[i])
+        // El primaryDocument de SEC apunta al HTML renderizado; pedimos el XML crudo.
+        const xmlPath = form345RawXmlPath(sub.recent.primaryDocument[i])
+        const doc = await fetchFilingDocument(cik, sub.recent.accessionNumber[i], xmlPath)
         if (doc) allTxns.push(...parseForm4Xml(doc))
       } catch {
         // ignoramos filings individuales que fallen — el agregado del resto sigue siendo válido
