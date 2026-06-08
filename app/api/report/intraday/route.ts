@@ -55,35 +55,15 @@ function fmtTime(d: Date) {
 // para que tickers o sectores con caracteres raros no rompan el parse.
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
-async function postTelegram(botToken: string, chatId: string, htmlText: string) {
-  const r = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: htmlText,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-    }),
-  })
-  if (!r.ok) {
-    const text = await r.text().catch(() => "")
-    throw new Error(`Telegram sendMessage ${r.status}: ${text.slice(0, 300)}`)
-  }
-}
-
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   if (!secret) return NextResponse.json({ error: "CRON_SECRET no configurada" }, { status: 500 })
   if (req.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
-  const botToken = process.env.TELEGRAM_BOT_TOKEN
-  const chatId = process.env.TELEGRAM_CHAT_ID
-  if (!botToken || !chatId) {
-    return NextResponse.json({ error: "TELEGRAM_BOT_TOKEN y/o TELEGRAM_CHAT_ID no configurados" }, { status: 500 })
-  }
-
+  // El endpoint no envía a ningún canal: devuelve el HTML del reporte como JSON.
+  // El POST a Telegram lo hace el workflow GH Actions con secrets de GitHub.
+  // Esto desacopla el delivery de Vercel y mantiene una sola fuente de verdad.
   const url = new URL(req.url)
   const momentParam = (url.searchParams.get("moment") ?? "").toUpperCase()
   const moment: Moment = (momentParam in MOMENTS ? momentParam : deriveMoment()) as Moment
@@ -190,15 +170,10 @@ export async function GET(req: NextRequest) {
     `<a href="https://wall-livid.vercel.app/sore">📊 Abrir dashboard</a>`,
   ].join("\n")
 
-  try {
-    await postTelegram(botToken, chatId, html)
-  } catch (e) {
-    return NextResponse.json({ error: "Telegram send failed", detail: String(e) }, { status: 500 })
-  }
-
   return NextResponse.json({
-    ok: true, moment, rows: rows.length,
-    m6Regime, m6Vix, openNow, openedToday, closedToday,
+    ok: true, moment, html,
+    rows: rows.length, m6Regime, m6Vix,
+    openNow, openedToday, closedToday,
     topConvictionSymbols: topConv.map(r => r.symbol),
   })
 }

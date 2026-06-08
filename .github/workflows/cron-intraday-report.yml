@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - name: Llamar /api/report/intraday
+      - name: Llamar /api/report/intraday (compute report)
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           ENDPOINT:    https://wall-livid.vercel.app/api/report/intraday
@@ -56,6 +56,28 @@ jobs:
             -H "User-Agent: gha-intraday-report" --max-time 280 \
             -o /tmp/r.json -w "%{http_code}")
           echo "HTTP $STATUS"
-          cat /tmp/r.json
-          echo
-          if [ "$STATUS" != "200" ]; then echo "::error::reporte falló"; exit 1; fi
+          if [ "$STATUS" != "200" ]; then cat /tmp/r.json; echo "::error::reporte falló"; exit 1; fi
+          jq -r '. | "moment=\(.moment) | rows=\(.rows) | regime=\(.m6Regime) | vix=\(.m6Vix)"' /tmp/r.json || true
+
+      - name: Postear reporte a Telegram
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT:  ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TG_TOKEN:-}" ] || [ -z "${TG_CHAT:-}" ]; then
+            echo "::error::TELEGRAM_BOT_TOKEN y/o TELEGRAM_CHAT_ID no configurados en GitHub Secrets"
+            exit 1
+          fi
+          # Construye el payload JSON con jq para encoding seguro del HTML
+          PAYLOAD=$(jq -n \
+            --arg chat "$TG_CHAT" \
+            --arg html "$(jq -r '.html' /tmp/r.json)" \
+            '{chat_id: $chat, text: $html, parse_mode: "HTML", disable_web_page_preview: true}')
+          STATUS=$(curl -sS -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            -o /tmp/tg.json -w "%{http_code}")
+          echo "Telegram HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then cat /tmp/tg.json; echo "::error::Telegram sendMessage falló"; exit 1; fi
+          echo "✓ Reporte enviado a Telegram"
