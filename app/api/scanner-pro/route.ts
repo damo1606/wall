@@ -238,6 +238,9 @@ function computeSORE(
   m6Regime: string,
   m6Suspended: boolean,
   m5Score: number,
+  // EDGAR F1/F2: opcionales — si vienen null, default neutral (no afectan)
+  insiderSignal?: number | null,     // -1..+1 (net flow USD vs market cap, squashed tanh)
+  shortRatioFloat?: number | null,   // 0..1 (shares short / float)
 ): { css: number; dss: number; vss: number; vrp: number; strategy: string; gate: "GO" | "WAIT" | "AVOID" } {
   // DSS: Dealer Stabilization Score
   // GEX > 0 = dealers long gamma = buy dips / sell rips = stabilizing
@@ -247,7 +250,9 @@ function computeSORE(
   const pressScore = Math.min(100, Math.max(0, (m1Pressure + 100) / 2))
   // PCR > 0.8: dealers sold puts = long delta = support bids under market
   const pcrScore = m1Pcr > 1.2 ? 70 : m1Pcr > 0.8 ? 55 : m1Pcr > 0.5 ? 40 : 25
-  const dss = Math.round(0.40 * gexScore + 0.35 * pressScore + 0.25 * pcrScore)
+  // F1: insider net flow del ticker. Selling fuerte = score bajo = DSS cae.
+  const insiderScore = insiderSignal == null ? 50 : Math.round((insiderSignal + 1) * 50)
+  const dss = Math.round(0.35 * gexScore + 0.30 * pressScore + 0.20 * pcrScore + 0.15 * insiderScore)
 
   // VSS: Volatility Suppression Score
   // fearScore 30–55 = elevated IV without panic = ideal premium selling window
@@ -270,7 +275,11 @@ function computeSORE(
 
   // VRP: Vol Risk Premium proxy — VIX historically trades ~3-5pts above 20d RV
   // VIX 12 = floor (VRP ≈ 0), VIX 37 = 100
-  const vrp = Math.round(Math.min(100, Math.max(0, (m6Vix - 12) * 4)))
+  let vrp = Math.round(Math.min(100, Math.max(0, (m6Vix - 12) * 4)))
+  // F2: si SI/float > 15%, el VRP per-ticker no es vendible (squeeze risk).
+  if (shortRatioFloat != null && shortRatioFloat > 0.15) {
+    vrp = Math.min(vrp, 30)
+  }
 
   // CSS: Composite Suppression Signal
   const css = Math.round(0.35 * dss + 0.35 * vss + 0.30 * vrp)
@@ -283,9 +292,16 @@ function computeSORE(
   let strategy: string
   let gate: "GO" | "WAIT" | "AVOID"
 
+  // F1+F2 ban de naked sells (SHORT STRANGLE): short interest > 20% del float
+  // o insider selling fuerte → forzar a defined risk (IRON CONDOR).
+  const banNakedSells = (shortRatioFloat != null && shortRatioFloat > 0.20)
+                     || (insiderSignal != null && insiderSignal < -0.7)
+
   if (css >= 75 && dss >= 65) {
     gate = "GO"
-    if (m6Regime === "COMPRESIÓN" && m6FearScore < 60) {
+    if (banNakedSells) {
+      strategy = "IRON CONDOR"  // defined risk forzado por short interest / insider selling
+    } else if (m6Regime === "COMPRESIÓN" && m6FearScore < 60) {
       strategy = m1Pcr > 0.9 ? "SHORT STRANGLE" : "IRON CONDOR"
     } else if (m6FearScore < 40) {
       strategy = "CALENDAR"
@@ -427,7 +443,7 @@ export async function GET(request: NextRequest) {
     .eq("is_active", true)
     .eq("asset_type", "stock")
   const symbolIds = (syms ?? []).map(s => s.id)
-  let scored: { stock: StockData; score: ScoreBreakdown }[] = []
+  let scored: { symbolId?: string; stock: StockData; score: ScoreBreakdown }[] = []
   if (symbolIds.length > 0) {
     const cutoff = new Date(Date.now() - 5 * 86_400_000).toISOString()
     const { data: scoreRows } = await db.from("valuation_scores")
@@ -436,11 +452,11 @@ export async function GET(request: NextRequest) {
       .gte("taken_at", cutoff)
       .in("symbol_id", symbolIds)
       .order("taken_at", { ascending: false })
-    const latestBySymbol = new Map<string, { stock: StockData; score: ScoreBreakdown }>()
+    const latestBySymbol = new Map<string, { symbolId: string; stock: StockData; score: ScoreBreakdown }>()
     for (const r of scoreRows ?? []) {
       if (latestBySymbol.has(r.symbol_id)) continue
       const c = r.components as unknown as { stock?: StockData; score?: ScoreBreakdown } | null
-      if (c?.stock && c?.score) latestBySymbol.set(r.symbol_id, { stock: c.stock, score: c.score })
+      if (c?.stock && c?.score) latestBySymbol.set(r.symbol_id, { symbolId: r.symbol_id, stock: c.stock, score: c.score })
     }
     scored = [...latestBySymbol.values()]
       .filter(({ score }) => score.buyScore >= minBuyScore)
@@ -481,6 +497,43 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: `Régimen M6: ${e.message}` }, { status: 500 });
   }
 
+  // 4b. EDGAR F1+F2: bulk query de insider_flows + short_interest para los
+  //     símbolos del lote. Latest por symbol_id. Maps keyed por symbol_id.
+  const scoredSymbolIds = scored.map(s => s.symbolId).filter((x): x is string => !!x)
+  const insiderMap = new Map<string, number>()    // symbolId → insiderSignal (-1..+1)
+  const shortMap = new Map<string, number>()      // symbolId → shortRatioFloat (0..1)
+  if (scoredSymbolIds.length > 0) {
+    const insiderCutoff = new Date(Date.now() - 35 * 86_400_000).toISOString().slice(0, 10)
+    const [insiderRes, shortRes] = await Promise.all([
+      db.from("insider_flows")
+        .select("symbol_id, net_flow_usd, period_end")
+        .gte("period_end", insiderCutoff)
+        .in("symbol_id", scoredSymbolIds)
+        .order("period_end", { ascending: false }),
+      db.from("short_interest")
+        .select("symbol_id, short_ratio_float, settlement_date")
+        .in("symbol_id", scoredSymbolIds)
+        .order("settlement_date", { ascending: false }),
+    ])
+    const seenI = new Set<string>()
+    for (const r of insiderRes.data ?? []) {
+      if (seenI.has(r.symbol_id)) continue
+      seenI.add(r.symbol_id)
+      const s = scored.find(x => x.symbolId === r.symbol_id)
+      const mc = s?.stock?.marketCap ?? 0
+      if (mc > 1e7 && r.net_flow_usd != null) {
+        // Normalize: net_flow / market_cap, squashed con tanh para [-1, +1]
+        insiderMap.set(r.symbol_id, Math.tanh((Number(r.net_flow_usd) / mc) * 1000))
+      }
+    }
+    const seenS = new Set<string>()
+    for (const r of shortRes.data ?? []) {
+      if (seenS.has(r.symbol_id)) continue
+      seenS.add(r.symbol_id)
+      if (r.short_ratio_float != null) shortMap.set(r.symbol_id, Number(r.short_ratio_float))
+    }
+  }
+
   // 5. M1 + M2 + M3 + M5 + M7 per ticker in parallel batches
   const BATCH = 4;
   const rows: ConvictionRow[] = [];
@@ -488,7 +541,7 @@ export async function GET(request: NextRequest) {
   for (let i = 0; i < scored.length; i += BATCH) {
     const batch = scored.slice(i, i + BATCH);
     const results = await Promise.allSettled(
-      batch.map(async ({ stock, score }) => {
+      batch.map(async ({ symbolId, stock, score }) => {
         try {
           const { spot, m1, m2, m3, m5, m7 } = await analyzeTickerFull(
             stock.symbol, cookie, crumb, m6
@@ -499,9 +552,12 @@ export async function GET(request: NextRequest) {
             : 0;
 
           const conviction = calcConviction(score.buyScore, m7.finalScore, true);
+          const insiderSignal = symbolId ? insiderMap.get(symbolId) ?? null : null
+          const shortRatioFloat = symbolId ? shortMap.get(symbolId) ?? null : null
           const sore = computeSORE(
             m1.netGex, m1.institutionalPressure, m1.putCallRatio,
             m6.vix, m6.fearScore, m6.regime, m6.signalSuspended, m5.score,
+            insiderSignal, shortRatioFloat,
           );
 
           return {
