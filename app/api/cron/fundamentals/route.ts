@@ -125,6 +125,25 @@ export async function GET(req: NextRequest) {
     if (!pErr) profileOk++
     else noteErr(s.ticker, "profile", pErr)
 
+    // short_interest — Yahoo lo recibe de FINRA biweekly. Persistimos por
+    // (symbol_id, settlement_date) para alimentar SORE: si short_ratio_float
+    // > 0.15 → degrada VRP; > 0.20 → ban naked sells (squeeze risk).
+    if (d.dateShortInterest && d.sharesShort != null) {
+      const settle = new Date(d.dateShortInterest * 1000).toISOString().slice(0, 10)
+      const { error: shErr } = await db.from("short_interest").upsert({
+        symbol_id: s.id,
+        settlement_date: settle,
+        short_shares: d.sharesShort,
+        short_shares_prior: d.sharesShortPriorMonth ?? null,
+        float_shares: d.floatShares ?? null,
+        shares_outstanding: d.sharesOutstanding ?? null,
+        short_ratio_float: d.shortPercentOfFloat ?? null,
+        short_ratio_days: d.shortRatio ?? null,
+        cron_run_id: runId,
+      } as never, { onConflict: "symbol_id,settlement_date" })
+      if (shErr && !benign(shErr)) noteErr(s.ticker, "short", shErr)
+    }
+
     // valuation_scores (methodology=buyScore) — cachea el score computado +
     // los campos de StockData que el scanner-pro necesita. Esto evita que
     // scanner-pro tenga que hammear Yahoo en vivo: lee de aquí en su lugar.

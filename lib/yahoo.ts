@@ -289,6 +289,14 @@ export type StockData = {
   ceo?: string            // primer officer
   website?: string
   founded?: number        // no lo da Yahoo directo — queda undefined salvo que se derive
+
+  // Short interest (defaultKeyStatistics — Yahoo lo recibe de FINRA biweekly)
+  sharesShort?: number
+  sharesShortPriorMonth?: number
+  floatShares?: number
+  shortRatio?: number          // days to cover
+  shortPercentOfFloat?: number // 0-1 (no porcentaje)
+  dateShortInterest?: number   // unix timestamp del settlement date (FINRA)
 }
 
 function buildUrl(symbol: string, crumb: string, calendar = false) {
@@ -466,6 +474,14 @@ export async function fetchStockData(symbol: string, calendar = false): Promise<
       city:        profile.city ?? undefined,
       ceo:         firstOfficer?.name ?? undefined,
       website:     profile.website ?? undefined,
+
+      // Short interest (defaultKeyStatistics)
+      sharesShort:           stats.sharesShort?.raw           ?? undefined,
+      sharesShortPriorMonth: stats.sharesShortPriorMonth?.raw ?? undefined,
+      floatShares:           stats.floatShares?.raw           ?? undefined,
+      shortRatio:            stats.shortRatio?.raw            ?? undefined,
+      shortPercentOfFloat:   stats.shortPercentOfFloat?.raw   ?? undefined,
+      dateShortInterest:     stats.dateShortInterest?.raw     ?? undefined,
 
       currentPrice,
       high52w,

@@ -1972,6 +1972,63 @@ export type Database = {
           },
         ]
       }
+      short_interest: {
+        Row: {
+          cron_run_id: string | null
+          float_shares: number | null
+          settlement_date: string
+          shares_outstanding: number | null
+          short_ratio_days: number | null
+          short_ratio_float: number | null
+          short_shares: number
+          short_shares_prior: number | null
+          source: string
+          symbol_id: string
+          taken_at: string
+        }
+        Insert: {
+          cron_run_id?: string | null
+          float_shares?: number | null
+          settlement_date: string
+          shares_outstanding?: number | null
+          short_ratio_days?: number | null
+          short_ratio_float?: number | null
+          short_shares: number
+          short_shares_prior?: number | null
+          source?: string
+          symbol_id: string
+          taken_at?: string
+        }
+        Update: {
+          cron_run_id?: string | null
+          float_shares?: number | null
+          settlement_date?: string
+          shares_outstanding?: number | null
+          short_ratio_days?: number | null
+          short_ratio_float?: number | null
+          short_shares?: number
+          short_shares_prior?: number | null
+          source?: string
+          symbol_id?: string
+          taken_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "short_interest_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "short_interest_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       signals: {
         Row: {
           closed_at: string | null
