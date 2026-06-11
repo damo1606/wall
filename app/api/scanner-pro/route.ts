@@ -497,14 +497,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: `Régimen M6: ${e.message}` }, { status: 500 });
   }
 
-  // 4b. EDGAR F1+F2: bulk query de insider_flows + short_interest para los
-  //     símbolos del lote. Latest por symbol_id. Maps keyed por symbol_id.
+  // 4b. EDGAR F1+F2+F3: bulk queries de insider_flows, short_interest y
+  //     material_events para los símbolos del lote. Maps keyed por symbol_id.
   const scoredSymbolIds = scored.map(s => s.symbolId).filter((x): x is string => !!x)
   const insiderMap = new Map<string, number>()    // symbolId → insiderSignal (-1..+1)
   const shortMap = new Map<string, number>()      // symbolId → shortRatioFloat (0..1)
+  const eventBlock = new Set<string>()            // symbolId con evento 8-K próximo → AVOID
   if (scoredSymbolIds.length > 0) {
     const insiderCutoff = new Date(Date.now() - 35 * 86_400_000).toISOString().slice(0, 10)
-    const [insiderRes, shortRes] = await Promise.all([
+    // F3 ventana: [today-1, today+3]. SEC permite filed 4 días post-evento,
+    // así que today-1 captura eventos de ayer recién reportados.
+    const evWindowStart = new Date(Date.now() - 1 * 86_400_000).toISOString().slice(0, 10)
+    const evWindowEnd   = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10)
+    const [insiderRes, shortRes, eventRes] = await Promise.all([
       db.from("insider_flows")
         .select("symbol_id, net_flow_usd, period_end")
         .gte("period_end", insiderCutoff)
@@ -514,6 +519,11 @@ export async function GET(request: NextRequest) {
         .select("symbol_id, short_ratio_float, settlement_date")
         .in("symbol_id", scoredSymbolIds)
         .order("settlement_date", { ascending: false }),
+      db.from("material_events")
+        .select("symbol_id, event_date, item_code")
+        .gte("event_date", evWindowStart)
+        .lte("event_date", evWindowEnd)
+        .in("symbol_id", scoredSymbolIds),
     ])
     const seenI = new Set<string>()
     for (const r of insiderRes.data ?? []) {
@@ -522,7 +532,6 @@ export async function GET(request: NextRequest) {
       const s = scored.find(x => x.symbolId === r.symbol_id)
       const mc = s?.stock?.marketCap ?? 0
       if (mc > 1e7 && r.net_flow_usd != null) {
-        // Normalize: net_flow / market_cap, squashed con tanh para [-1, +1]
         insiderMap.set(r.symbol_id, Math.tanh((Number(r.net_flow_usd) / mc) * 1000))
       }
     }
@@ -531,6 +540,9 @@ export async function GET(request: NextRequest) {
       if (seenS.has(r.symbol_id)) continue
       seenS.add(r.symbol_id)
       if (r.short_ratio_float != null) shortMap.set(r.symbol_id, Number(r.short_ratio_float))
+    }
+    for (const r of eventRes.data ?? []) {
+      if (r.symbol_id) eventBlock.add(r.symbol_id)
     }
   }
 
@@ -554,9 +566,14 @@ export async function GET(request: NextRequest) {
           const conviction = calcConviction(score.buyScore, m7.finalScore, true);
           const insiderSignal = symbolId ? insiderMap.get(symbolId) ?? null : null
           const shortRatioFloat = symbolId ? shortMap.get(symbolId) ?? null : null
+          // F3 hard block: si hay 8-K en ventana [today-1, today+3], force AVOID.
+          // Pasamos m6Suspended=true al computeSORE (mismo codepath de pánico).
+          const blockedByEvent = symbolId ? eventBlock.has(symbolId) : false
           const sore = computeSORE(
             m1.netGex, m1.institutionalPressure, m1.putCallRatio,
-            m6.vix, m6.fearScore, m6.regime, m6.signalSuspended, m5.score,
+            m6.vix, m6.fearScore, m6.regime,
+            m6.signalSuspended || blockedByEvent,
+            m5.score,
             insiderSignal, shortRatioFloat,
           );
 

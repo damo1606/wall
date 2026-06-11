@@ -1294,6 +1294,60 @@ export type Database = {
           },
         ]
       }
+      material_events: {
+        Row: {
+          accession_num: string | null
+          cron_run_id: string | null
+          event_date: string
+          filing_date: string
+          id: string
+          item_code: string
+          item_label: string | null
+          source: string
+          symbol_id: string
+          taken_at: string
+        }
+        Insert: {
+          accession_num?: string | null
+          cron_run_id?: string | null
+          event_date: string
+          filing_date: string
+          id?: string
+          item_code: string
+          item_label?: string | null
+          source?: string
+          symbol_id: string
+          taken_at?: string
+        }
+        Update: {
+          accession_num?: string | null
+          cron_run_id?: string | null
+          event_date?: string
+          filing_date?: string
+          id?: string
+          item_code?: string
+          item_label?: string | null
+          source?: string
+          symbol_id?: string
+          taken_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "material_events_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_events_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       methodology_snapshots: {
         Row: {
           cron_run_id: string | null
