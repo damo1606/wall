@@ -211,6 +211,10 @@ export interface ConvictionRow {
   soreGate: "GO" | "WAIT" | "AVOID";
   noOptions?: boolean;   // true solo si el ticker realmente no tiene opciones
   scanError?: boolean;   // true si el scan falló por causa transitoria (Yahoo/red)
+  // EDGAR F1/F2/F3 — señales que ahora modulan SORE. null = no data disponible.
+  edgarInsiderSignal?: number | null;     // -1..+1 (tanh(net_flow_30d / market_cap × 1000))
+  edgarShortRatioFloat?: number | null;   // 0..1 (sharesShort / floatShares)
+  edgarEventBlocked?: boolean;            // true = 8-K en ventana [today-1, today+3] → AVOID forzado
 }
 
 // ── Scoring helpers ───────────────────────────────────────────────────────────
@@ -632,6 +636,9 @@ export async function GET(request: NextRequest) {
             soreVRP: sore.vrp,
             soreStrategy: sore.strategy,
             soreGate: sore.gate,
+            edgarInsiderSignal: insiderSignal,
+            edgarShortRatioFloat: shortRatioFloat,
+            edgarEventBlocked: blockedByEvent,
           } satisfies ConvictionRow;
         } catch (e) {
           const genuinelyNoOptions = e instanceof NoOptionsError;
