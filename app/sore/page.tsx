@@ -55,6 +55,37 @@ function ScoreBar({ value }: { value: number }) {
   );
 }
 
+// EDGAR F1/F2/F3 — etiquetas compactas que explican por qué SORE modificó el gate.
+// Si no hay señales, muestra em dash.
+function EdgarReasonBadges({ row }: { row: ConvictionRow }) {
+  const tags: { label: string; tip: string; cls: string }[] = []
+  if (row.edgarEventBlocked) {
+    tags.push({ label: "🚨 8-K", tip: "Material 8-K en ventana [-1d, +3d]: gate forzado a AVOID", cls: "bg-red-900/60 border-red-700 text-red-200" })
+  }
+  if (typeof row.edgarShortRatioFloat === "number" && row.edgarShortRatioFloat > 0.15) {
+    const pct = (row.edgarShortRatioFloat * 100).toFixed(0)
+    const danger = row.edgarShortRatioFloat > 0.20
+    tags.push({
+      label: `⚠️ SI ${pct}%`,
+      tip: `Short interest / float = ${pct}%. ${danger ? "VRP capado + ban naked sells (squeeze risk)." : "VRP capado a 30."}`,
+      cls: danger ? "bg-orange-900/60 border-orange-700 text-orange-200" : "bg-yellow-900/40 border-yellow-800 text-yellow-300",
+    })
+  }
+  if (typeof row.edgarInsiderSignal === "number" && row.edgarInsiderSignal < -0.7) {
+    tags.push({ label: "📉 INS", tip: `Insider selling fuerte (signal ${row.edgarInsiderSignal.toFixed(2)}): ban naked sells.`, cls: "bg-purple-900/60 border-purple-700 text-purple-200" })
+  }
+  if (tags.length === 0) return <span className="text-[10px] text-muted">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tags.map((t, i) => (
+        <span key={i} title={t.tip} className={`text-[10px] font-bold px-1.5 py-0.5 rounded border tracking-wider cursor-help ${t.cls}`}>
+          {t.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 // ── Sort ──────────────────────────────────────────────────────────────────────
 
 type SortKey = keyof ConvictionRow;
@@ -298,6 +329,7 @@ export default function SorePage() {
                   <Th label="VSS"        sortKey="soreVSS"       current={sortKey} asc={sortAsc} onSort={handleSort} />
                   <Th label="VRP"        sortKey="soreVRP"       current={sortKey} asc={sortAsc} onSort={handleSort} />
                   <Th label="ESTRATEGIA" sortKey="soreStrategy"  current={sortKey} asc={sortAsc} onSort={handleSort} />
+                  <th className="px-3 py-2 text-[10px] tracking-widest text-muted text-left">EDGAR</th>
                   <Th label="GEX"        sortKey="m1NetGex"      current={sortKey} asc={sortAsc} onSort={handleSort} />
                   <Th label="PCR"        sortKey="m1Pcr"         current={sortKey} asc={sortAsc} onSort={handleSort} />
                   <Th label="RÉGIMEN"    sortKey="m6Regime"      current={sortKey} asc={sortAsc} onSort={handleSort} />
@@ -325,6 +357,7 @@ export default function SorePage() {
                         {row.noOptions ? <span className="text-xs text-muted">—</span> : <ScoreBar value={row.soreVRP} />}
                       </td>
                       <td className="px-3 py-2.5"><StrategyBadge strategy={row.soreStrategy} noOptions={row.noOptions} /></td>
+                      <td className="px-3 py-2.5"><EdgarReasonBadges row={row} /></td>
                       <td className="px-3 py-2.5 font-mono text-xs text-subtle">
                         {row.noOptions ? "—" : (row.m1NetGex / 1e9).toFixed(2) + "B"}
                       </td>
