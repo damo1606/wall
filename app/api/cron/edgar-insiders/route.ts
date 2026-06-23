@@ -69,14 +69,17 @@ export async function GET(req: NextRequest) {
 
   // Solo símbolos con CIK (stocks listados en SEC). ETFs/índices se filtran solos
   // porque tienen cik IS NULL.
-  const { data: syms, error: symErr } = await db
+  type SymRow = { id: string; ticker: string; cik: string | null }
+  // Los tipos generados de Supabase están desfasados (no incluyen `cik`), por eso
+  // el filtro usa `as never` y forzamos el tipo del resultado en el await.
+  const { data: symsData, error: symErr } = await db
     .from("symbols")
     .select("id, ticker, cik")
     .eq("is_active", true)
     .not("cik" as never, "is", null)
     .order("ticker")
     .range(batchStart, batchStart + batchSize - 1)
-  if (symErr || !syms) {
+  if (symErr) {
     await db.from("cron_runs").update({
       finished_at: new Date().toISOString(), status: "failed",
       error_summary: `symbols query: ${symErr?.message}`,
@@ -84,6 +87,7 @@ export async function GET(req: NextRequest) {
     }).eq("id", runId)
     return NextResponse.json({ error: "symbols query failed", detail: symErr?.message }, { status: 500 })
   }
+  const syms = (symsData ?? []) as unknown as SymRow[]
 
   if (syms.length === 0) {
     await db.from("cron_runs").update({
@@ -102,7 +106,7 @@ export async function GET(req: NextRequest) {
   const sampleAgg: Array<{ ticker: string; net: number; trades: number }> = []
 
   await pool(syms, EDGAR_CONCURRENCY, async (s) => {
-    const cik = s.cik as unknown as string  // sabemos que no es null por el filtro
+    const cik = s.cik as string  // no es null por el filtro .not("cik","is",null)
     let sub
     try {
       sub = await fetchSubmissions(cik)
