@@ -29,6 +29,7 @@ export interface SRCluster {
   stopPrice: number;
   rrRatio: number | null;
   historicalDays?: number;  // 0-7: cuántos snapshots recientes confirmaron este nivel (±0.5%)
+  charmPin?: boolean;       // true si el nivel coincide con el strike-imán de charm (M1) → mayor convicción
 }
 
 export interface TimingBlock {
@@ -67,6 +68,9 @@ export interface Analysis7Result {
   m6FearLabel: string;
   m6Vix: number;
   m6VixVelocity: string;
+  // Charm (M1): strike-imán de cierre y exposure neto de decaimiento de delta.
+  pinStrike: number;
+  netCharm: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -248,6 +252,19 @@ function buildInstitutionalSRTable(
       rrRatio: null,
     };
   });
+
+  // Refuerzo por charm (M1): un nivel S/R que coincide (±0.5%) con el strike-imán
+  // de charm gana convicción — el flujo de cobertura por el paso del tiempo tiende
+  // a clavar el precio ahí cerca del vencimiento. Boost acotado, calificacion ≤ 100.
+  if (m1.pinStrike > 0) {
+    for (const cl of srTable) {
+      if (Math.abs(cl.strike - m1.pinStrike) / m1.pinStrike <= 0.005) {
+        cl.charmPin = true;
+        cl.calificacion = Math.min(100, cl.calificacion + 12);
+        cl.probability = cl.calificacion;
+      }
+    }
+  }
 
   // Ordenar por calificacion DESC
   srTable.sort((a, b) => b.calificacion - a.calificacion);
@@ -448,6 +465,7 @@ function buildSummaryLines(
   timingMatrix: TimingBlock[],
   primaryLong: SRCluster | null,
   primaryShort: SRCluster | null,
+  m1: AnalysisResult,
 ): string[] {
 
   const countAligned = contributions.filter((c) =>
@@ -458,6 +476,16 @@ function buildSummaryLines(
   const m5c = contributions.find((c) => c.id === "M5")!;
   const m6c = contributions.find((c) => c.id === "M6")!;
   const topTiming = [...timingMatrix].sort((a, b) => b.conviction - a.conviction)[0];
+
+  // Charm (M1): pin de cierre + niveles reforzados
+  const pinDistPct = m1.pinStrike > 0 ? ((m1.pinStrike - spot) / spot) * 100 : 0;
+  const charmReinforced = srTable.filter((c) => c.charmPin);
+  const charmLine =
+    `Charm/Pin (M1): strike-imán $${fmt(m1.pinStrike)} (${pinDistPct >= 0 ? "+" : ""}${fmt(pinDistPct, 1)}% vs spot), ` +
+    `charm neto ${m1.netCharm >= 0 ? "+" : ""}${fmt(m1.netCharm, 0)}. ` +
+    (charmReinforced.length > 0
+      ? `${charmReinforced.length} nivel(es) S/R reforzado(s) por convergencia con el pin — mayor probabilidad de actuar como ancla al acercarse el vencimiento.`
+      : `Sin coincidencia S/R con el pin; presión de pinning difusa este ciclo.`);
 
   const regimeRisk =
     m6.regime === "COMPRESIÓN" ?
@@ -477,6 +505,7 @@ function buildSummaryLines(
     topTiming && topTiming.entry && topTiming.target && topTiming.stop ?
       `Mejor configuración: ${topTiming.timeframe} (${topTiming.conviction}% convicción). Señal ${topTiming.signal}. Entry $${fmt(topTiming.entry)} → Target $${fmt(topTiming.target)} · Stop $${fmt(topTiming.stop)}${topTiming.rrRatio ? ` → R/R ${topTiming.rrRatio}` : ""}. Base: ${topTiming.basis}.` :
       `Timing multi-marco calculado. ${timingMatrix.filter((t) => t.signal !== "NO OPERAR").length}/4 marcos con señal activa. Régimen ${m6.regime} condiciona las entradas.`,
+    charmLine,
     regimeRisk,
   ];
 }
@@ -507,7 +536,7 @@ export function computeAnalysis7(
 
   const summaryLines = buildSummaryLines(
     ticker, spot, finalScore, finalVerdict, confidence,
-    contributions, srTable, m6, timingMatrix, primaryLong, primaryShort,
+    contributions, srTable, m6, timingMatrix, primaryLong, primaryShort, m1,
   );
 
   return {
@@ -533,5 +562,7 @@ export function computeAnalysis7(
     m6FearLabel: m6.fearLabel,
     m6Vix: m6.vix,
     m6VixVelocity: m6.vixVelocity,
+    pinStrike: m1.pinStrike,
+    netCharm: m1.netCharm,
   };
 }

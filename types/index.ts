@@ -16,6 +16,11 @@ export interface VannaPoint {
   vanna: number;
 }
 
+export interface CharmPoint {
+  strike: number;
+  charm: number;
+}
+
 export interface StrikeData {
   strike: number;
   callOI: number;
@@ -72,6 +77,7 @@ export interface AnalysisResult {
   levels: Levels;
   gexProfile: GexPoint[];
   vannaProfile: VannaPoint[];
+  charmProfile: CharmPoint[];
   dealerFlow: {
     prices: number[];
     flows: number[];
@@ -79,4 +85,8 @@ export interface AnalysisResult {
   putCallRatio: number;
   institutionalPressure: number;
   netGex: number;
+  // Charm (∂Δ/∂t): exposure neto de decaimiento de delta y strike-imán de cierre.
+  // Aditivo — no altera netGex/institutionalPressure/levels (SORE no se ve afectado).
+  netCharm: number;
+  pinStrike: number;
 }

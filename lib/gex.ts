@@ -1,5 +1,5 @@
-import { gammaBS, vannaBS } from "./blackscholes";
-import type { AnalysisResult, GexPoint, VannaPoint } from "@/types";
+import { gammaBS, vannaBS, charmBS } from "./blackscholes";
+import type { AnalysisResult, GexPoint, VannaPoint, CharmPoint } from "@/types";
 
 const RISK_FREE_RATE = 0.05;
 const CONTRACT_SIZE = 100;
@@ -24,6 +24,7 @@ interface ProcessedOption {
   type: "call" | "put";
   gex: number;
   vanna: number;
+  charm: number;
 }
 
 export function computeAnalysis(
@@ -48,6 +49,7 @@ export function computeAnalysis(
     if (!c.impliedVolatility || !c.openInterest || c.openInterest < minOI) continue;
     const g = gammaBS(spot, c.strike, T, RISK_FREE_RATE, c.impliedVolatility);
     const v = vannaBS(spot, c.strike, T, RISK_FREE_RATE, c.impliedVolatility);
+    const ch = charmBS(spot, c.strike, T, RISK_FREE_RATE, c.impliedVolatility);
     options.push({
       strike: c.strike,
       iv: c.impliedVolatility,
@@ -55,6 +57,7 @@ export function computeAnalysis(
       type: "call",
       gex: g * c.openInterest * CONTRACT_SIZE * spot * spot,
       vanna: v * c.openInterest * CONTRACT_SIZE,
+      charm: ch * c.openInterest * CONTRACT_SIZE,
     });
   }
 
@@ -62,6 +65,7 @@ export function computeAnalysis(
     if (!p.impliedVolatility || !p.openInterest || p.openInterest < minOI) continue;
     const g = gammaBS(spot, p.strike, T, RISK_FREE_RATE, p.impliedVolatility);
     const v = vannaBS(spot, p.strike, T, RISK_FREE_RATE, p.impliedVolatility);
+    const ch = charmBS(spot, p.strike, T, RISK_FREE_RATE, p.impliedVolatility);
     options.push({
       strike: p.strike,
       iv: p.impliedVolatility,
@@ -69,6 +73,7 @@ export function computeAnalysis(
       type: "put",
       gex: -(g * p.openInterest * CONTRACT_SIZE * spot * spot),
       vanna: -(v * p.openInterest * CONTRACT_SIZE),
+      charm: -(ch * p.openInterest * CONTRACT_SIZE),
     });
   }
 
@@ -79,10 +84,12 @@ export function computeAnalysis(
   // Aggregate by strike
   const gexMap = new Map<number, number>();
   const vannaMap = new Map<number, number>();
+  const charmMap = new Map<number, number>();
 
   for (const opt of options) {
     gexMap.set(opt.strike, (gexMap.get(opt.strike) ?? 0) + opt.gex);
     vannaMap.set(opt.strike, (vannaMap.get(opt.strike) ?? 0) + opt.vanna);
+    charmMap.set(opt.strike, (charmMap.get(opt.strike) ?? 0) + opt.charm);
   }
 
   const gexProfile: GexPoint[] = Array.from(gexMap.entries())
@@ -91,6 +98,10 @@ export function computeAnalysis(
 
   const vannaProfile: VannaPoint[] = Array.from(vannaMap.entries())
     .map(([strike, vanna]) => ({ strike, vanna }))
+    .sort((a, b) => a.strike - b.strike);
+
+  const charmProfile: CharmPoint[] = Array.from(charmMap.entries())
+    .map(([strike, charm]) => ({ strike, charm }))
     .sort((a, b) => a.strike - b.strike);
 
   // Key levels
@@ -135,6 +146,15 @@ export function computeAnalysis(
       ? (netGex / (totalCallGEX + totalPutGEX)) * 100
       : 0;
 
+  // Charm: exposure neto de decaimiento de delta + strike-imán de cierre (pin).
+  // El pin es el strike donde se concentra más charm (en magnitud): el flujo de
+  // cobertura de dealers por el paso del tiempo tiende a "clavar" el precio ahí
+  // cerca del vencimiento. Aditivo — no interviene en netGex/levels.
+  const netCharm = charmProfile.reduce((sum, p) => sum + p.charm, 0);
+  const pinStrike = charmProfile.length > 0
+    ? charmProfile.reduce((m, p) => (Math.abs(p.charm) > Math.abs(m.charm) ? p : m), charmProfile[0]).strike
+    : spot;
+
   // Dealer hedging flow model
   const steps = 60;
   const prices: number[] = [];
@@ -161,9 +181,12 @@ export function computeAnalysis(
     levels: { callWall, putWall, gammaFlip, support, resistance },
     gexProfile,
     vannaProfile,
+    charmProfile,
     dealerFlow: { prices, flows },
     putCallRatio: parseFloat(putCallRatio.toFixed(2)),
     institutionalPressure: parseFloat(institutionalPressure.toFixed(1)),
     netGex,
+    netCharm,
+    pinStrike,
   };
 }

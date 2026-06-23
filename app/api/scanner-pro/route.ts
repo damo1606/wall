@@ -20,6 +20,7 @@ import { computeAnalysis3 } from "@/lib/gex3";
 import { computeAnalysis5, compute25dSkew, type ExpData5 } from "@/lib/gex5";
 import { computeSpyMetrics, computeRegime } from "@/lib/gex6";
 import { computeAnalysis7 } from "@/lib/gex7";
+import { computeAnalysis8, type ExpData8 } from "@/lib/gex8";
 import type { ExpData } from "@/lib/gex3";
 import type { Analysis6Result } from "@/lib/gex6";
 
@@ -78,11 +79,13 @@ function extractRaw(opts: any) {
       strike: c.strike ?? 0,
       impliedVolatility: c.impliedVolatility ?? 0,
       openInterest: c.openInterest ?? 0,
+      volume: c.volume ?? 0,
     })),
     puts: (opts?.puts ?? []).map((p: any) => ({
       strike: p.strike ?? 0,
       impliedVolatility: p.impliedVolatility ?? 0,
       openInterest: p.openInterest ?? 0,
+      volume: p.volume ?? 0,
     })),
   };
 }
@@ -212,9 +215,18 @@ export interface ConvictionRow {
   noOptions?: boolean;   // true solo si el ticker realmente no tiene opciones
   scanError?: boolean;   // true si el scan falló por causa transitoria (Yahoo/red)
   // EDGAR F1/F2/F3 — señales que ahora modulan SORE. null = no data disponible.
-  edgarInsiderSignal?: number | null;     // -1..+1 (tanh(net_flow_30d / market_cap × 1000))
+  edgarInsiderSignal?: number | null;     // -1..+1 (tanh(net_flow_30d / market_cap × 50); ban a ≈ -2% mc)
   edgarShortRatioFloat?: number | null;   // 0..1 (sharesShort / floatShares)
   edgarEventBlocked?: boolean;            // true = 8-K en ventana [today-1, today+3] → AVOID forzado
+  // M8 — Flujo fresco (volumen vs OI) + liquidez. Opcionales: ausentes en path sin opciones.
+  m8FlowImbalance?: number;               // -100..+100 (call vs put dominado, por volumen)
+  m8VolumePcr?: number;                   // put vol / call vol
+  m8FreshFlowRatio?: number;              // volumen NTM / OI NTM
+  m8LiquidityTier?: "ALTA" | "MEDIA" | "BAJA" | "ILÍQUIDO";
+  m8Tradeable?: boolean;                  // false → no operable
+  m8Score?: number;                       // -100..+100 sesgo de flujo fresco
+  m8Verdict?: string;                     // ACUMULACIÓN | DISTRIBUCIÓN | NEUTRAL
+  m8LiquidityBlocked?: boolean;           // true = M8 forzó AVOID por iliquidez
 }
 
 // ── Scoring helpers ───────────────────────────────────────────────────────────
@@ -396,7 +408,10 @@ async function analyzeTickerFull(
   // M7 — veredicto final agregando M1-M6
   const m7 = computeAnalysis7(symbol, spot, m1, m2, m3, m5, m6);
 
-  return { spot, m1, m2, m3, m5, m6, m7 };
+  // M8 — flujo fresco (volumen vs OI) + gate de liquidez
+  const m8 = computeAnalysis8(symbol, spot, expDataList as unknown as ExpData8[]);
+
+  return { spot, m1, m2, m3, m5, m6, m7, m8 };
 }
 
 // ── Pool helper para el fallback a Yahoo en vivo ──────────────────────────────
@@ -536,7 +551,12 @@ export async function GET(request: NextRequest) {
       const s = scored.find(x => x.symbolId === r.symbol_id)
       const mc = s?.stock?.marketCap ?? 0
       if (mc > 1e7 && r.net_flow_usd != null) {
-        insiderMap.set(r.symbol_id, Math.tanh((Number(r.net_flow_usd) / mc) * 1000))
+        // Factor calibrado para que el umbral de ban (signal < -0.7) caiga en
+        // net_flow ≈ -2% del market cap (umbral documentado en la migración
+        // insider_flows): -0.02 × 50 = -1 → tanh(-1) ≈ -0.76 < -0.7. El factor
+        // viejo (×1000) saturaba a ~0.09% y volvía F1 prácticamente binario.
+        const INSIDER_SCALE = 50
+        insiderMap.set(r.symbol_id, Math.tanh((Number(r.net_flow_usd) / mc) * INSIDER_SCALE))
       }
     }
     const seenS = new Set<string>()
@@ -559,7 +579,7 @@ export async function GET(request: NextRequest) {
     const results = await Promise.allSettled(
       batch.map(async ({ symbolId, stock, score }) => {
         try {
-          const { spot, m1, m2, m3, m5, m7 } = await analyzeTickerFull(
+          const { spot, m1, m2, m3, m5, m7, m8 } = await analyzeTickerFull(
             stock.symbol, cookie, crumb, m6
           );
 
@@ -573,10 +593,14 @@ export async function GET(request: NextRequest) {
           // F3 hard block: si hay 8-K en ventana [today-1, today+3], force AVOID.
           // Pasamos m6Suspended=true al computeSORE (mismo codepath de pánico).
           const blockedByEvent = symbolId ? eventBlock.has(symbolId) : false
+          // M8 gate de liquidez: si el subyacente no es operable (OI/volumen NTM
+          // insuficientes), force AVOID por el mismo codepath. No vender prima en
+          // opciones que luego no se pueden cerrar. Aditivo — no toca la matemática SORE.
+          const blockedByLiquidity = !m8.tradeable
           const sore = computeSORE(
             m1.netGex, m1.institutionalPressure, m1.putCallRatio,
             m6.vix, m6.fearScore, m6.regime,
-            m6.signalSuspended || blockedByEvent,
+            m6.signalSuspended || blockedByEvent || blockedByLiquidity,
             m5.score,
             insiderSignal, shortRatioFloat,
           );
@@ -639,6 +663,14 @@ export async function GET(request: NextRequest) {
             edgarInsiderSignal: insiderSignal,
             edgarShortRatioFloat: shortRatioFloat,
             edgarEventBlocked: blockedByEvent,
+            m8FlowImbalance: m8.flowImbalance,
+            m8VolumePcr: m8.volumePcr,
+            m8FreshFlowRatio: m8.freshFlowRatio,
+            m8LiquidityTier: m8.liquidityTier,
+            m8Tradeable: m8.tradeable,
+            m8Score: m8.score,
+            m8Verdict: m8.verdict,
+            m8LiquidityBlocked: blockedByLiquidity,
           } satisfies ConvictionRow;
         } catch (e) {
           const genuinelyNoOptions = e instanceof NoOptionsError;
