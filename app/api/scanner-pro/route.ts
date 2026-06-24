@@ -523,16 +523,18 @@ export async function GET(request: NextRequest) {
   const shortMap = new Map<string, number>()      // symbolId → shortRatioFloat (0..1)
   const eventBlock = new Set<string>()            // symbolId con evento 8-K próximo → AVOID
   if (scoredSymbolIds.length > 0) {
-    const insiderCutoff = new Date(Date.now() - 35 * 86_400_000).toISOString().slice(0, 10)
+    // Helper: fecha ISO (YYYY-MM-DD) de hace N días.
+    const daysAgoISO = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10)
+    const insiderCutoff = daysAgoISO(35)
     // F3 (A2): bloqueamos por filing_date reciente, NO por event_date. El event_date
     // es cuándo OCURRIÓ el evento (siempre pasado), así que una ventana al futuro
     // nunca matchea y se cuelan huecos de cobertura. Lo relevante para el riesgo de
     // vol es que el 8-K se haya FILED hace poco (SEC da 4 días hábiles); 4 días
     // naturales cubren el fin de semana.
-    const filingCutoff = new Date(Date.now() - 4 * 86_400_000).toISOString().slice(0, 10)
+    const filingCutoff = daysAgoISO(4)
     // M3: piso de recencia para short_interest. FINRA reporta quincenal; más de
     // 45 días es dato rancio que no debe capar VRP ni banear naked sells.
-    const shortCutoff = new Date(Date.now() - 45 * 86_400_000).toISOString().slice(0, 10)
+    const shortCutoff = daysAgoISO(45)
     const [insiderRes, shortRes, eventRes] = await Promise.all([
       db.from("insider_flows")
         .select("symbol_id, net_flow_usd, period_end")
@@ -549,12 +551,12 @@ export async function GET(request: NextRequest) {
         .gte("filing_date", filingCutoff)
         .in("symbol_id", scoredSymbolIds),
     ])
+    const scoredById = new Map(scored.map(x => [x.symbolId, x]))
     const seenI = new Set<string>()
     for (const r of insiderRes.data ?? []) {
       if (seenI.has(r.symbol_id)) continue
       seenI.add(r.symbol_id)
-      const s = scored.find(x => x.symbolId === r.symbol_id)
-      const mc = s?.stock?.marketCap ?? 0
+      const mc = scoredById.get(r.symbol_id)?.stock?.marketCap ?? 0
       if (mc > 1e7 && r.net_flow_usd != null) {
         // Factor calibrado para que el umbral de ban (signal < -0.7) caiga en
         // net_flow ≈ -2% del market cap (umbral documentado en la migración
