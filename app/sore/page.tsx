@@ -190,9 +190,9 @@ export default function SorePage() {
 
           {/* Gate legend */}
           <div className="flex flex-wrap gap-4 mt-3 text-[10px] tracking-widest">
-            <span className="text-emerald-400 font-bold">● GO &gt;75 · Vender prima activamente</span>
-            <span className="text-yellow-400 font-bold">◐ WAIT 55–75 · Solo credit spreads</span>
-            <span className="text-gray-500 font-bold">○ AVOID &lt;55 · Régimen adverso</span>
+            <span className="text-emerald-400 font-bold">● GO · CSS ≥75 y DSS ≥65 · Vender prima activamente</span>
+            <span className="text-yellow-400 font-bold">◐ WAIT · CSS 45–74 (o sin DSS) · Solo credit spreads</span>
+            <span className="text-gray-500 font-bold">○ AVOID · CSS &lt;45 o régimen adverso</span>
           </div>
         </div>
       </div>

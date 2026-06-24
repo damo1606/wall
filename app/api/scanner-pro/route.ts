@@ -217,7 +217,7 @@ export interface ConvictionRow {
   // EDGAR F1/F2/F3 — señales que ahora modulan SORE. null = no data disponible.
   edgarInsiderSignal?: number | null;     // -1..+1 (tanh(net_flow_30d / market_cap × 50); ban a ≈ -2% mc)
   edgarShortRatioFloat?: number | null;   // 0..1 (sharesShort / floatShares)
-  edgarEventBlocked?: boolean;            // true = 8-K en ventana [today-1, today+3] → AVOID forzado
+  edgarEventBlocked?: boolean;            // true = 8-K filed en los últimos 4 días → AVOID forzado
   // M8 — Flujo fresco (volumen vs OI) + liquidez. Opcionales: ausentes en path sin opciones.
   m8FlowImbalance?: number;               // -100..+100 (call vs put dominado, por volumen)
   m8VolumePcr?: number;                   // put vol / call vol
@@ -524,10 +524,15 @@ export async function GET(request: NextRequest) {
   const eventBlock = new Set<string>()            // symbolId con evento 8-K próximo → AVOID
   if (scoredSymbolIds.length > 0) {
     const insiderCutoff = new Date(Date.now() - 35 * 86_400_000).toISOString().slice(0, 10)
-    // F3 ventana: [today-1, today+3]. SEC permite filed 4 días post-evento,
-    // así que today-1 captura eventos de ayer recién reportados.
-    const evWindowStart = new Date(Date.now() - 1 * 86_400_000).toISOString().slice(0, 10)
-    const evWindowEnd   = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10)
+    // F3 (A2): bloqueamos por filing_date reciente, NO por event_date. El event_date
+    // es cuándo OCURRIÓ el evento (siempre pasado), así que una ventana al futuro
+    // nunca matchea y se cuelan huecos de cobertura. Lo relevante para el riesgo de
+    // vol es que el 8-K se haya FILED hace poco (SEC da 4 días hábiles); 4 días
+    // naturales cubren el fin de semana.
+    const filingCutoff = new Date(Date.now() - 4 * 86_400_000).toISOString().slice(0, 10)
+    // M3: piso de recencia para short_interest. FINRA reporta quincenal; más de
+    // 45 días es dato rancio que no debe capar VRP ni banear naked sells.
+    const shortCutoff = new Date(Date.now() - 45 * 86_400_000).toISOString().slice(0, 10)
     const [insiderRes, shortRes, eventRes] = await Promise.all([
       db.from("insider_flows")
         .select("symbol_id, net_flow_usd, period_end")
@@ -536,12 +541,12 @@ export async function GET(request: NextRequest) {
         .order("period_end", { ascending: false }),
       db.from("short_interest")
         .select("symbol_id, short_ratio_float, settlement_date")
+        .gte("settlement_date", shortCutoff)
         .in("symbol_id", scoredSymbolIds)
         .order("settlement_date", { ascending: false }),
       db.from("material_events")
-        .select("symbol_id, event_date, item_code")
-        .gte("event_date", evWindowStart)
-        .lte("event_date", evWindowEnd)
+        .select("symbol_id, filing_date, item_code")
+        .gte("filing_date", filingCutoff)
         .in("symbol_id", scoredSymbolIds),
     ])
     const seenI = new Set<string>()
@@ -590,7 +595,7 @@ export async function GET(request: NextRequest) {
           const conviction = calcConviction(score.buyScore, m7.finalScore, true);
           const insiderSignal = symbolId ? insiderMap.get(symbolId) ?? null : null
           const shortRatioFloat = symbolId ? shortMap.get(symbolId) ?? null : null
-          // F3 hard block: si hay 8-K en ventana [today-1, today+3], force AVOID.
+          // F3 hard block: si hay 8-K filed en los últimos 4 días, force AVOID.
           // Pasamos m6Suspended=true al computeSORE (mismo codepath de pánico).
           const blockedByEvent = symbolId ? eventBlock.has(symbolId) : false
           // M8 gate de liquidez: si el subyacente no es operable (OI/volumen NTM
