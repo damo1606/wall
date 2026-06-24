@@ -217,7 +217,7 @@ export interface ConvictionRow {
   // EDGAR F1/F2/F3 — señales que ahora modulan SORE. null = no data disponible.
   edgarInsiderSignal?: number | null;     // -1..+1 (tanh(net_flow_30d / market_cap × 50); ban a ≈ -2% mc)
   edgarShortRatioFloat?: number | null;   // 0..1 (sharesShort / floatShares)
-  edgarEventBlocked?: boolean;            // true = 8-K filed en los últimos 4 días → AVOID forzado
+  edgarEventBlocked?: boolean;            // true = 8-K de vol real (distress/earnings/M&A) filed <4 días → AVOID
   // M8 — Flujo fresco (volumen vs OI) + liquidez. Opcionales: ausentes en path sin opciones.
   m8FlowImbalance?: number;               // -100..+100 (call vs put dominado, por volumen)
   m8VolumePcr?: number;                   // put vol / call vol
@@ -245,6 +245,13 @@ function toVerdict(score: number): ConvictionRow["verdict"] {
   return "NEUTRAL";
 }
 
+// M1: items 8-K que fuerzan AVOID (vol explosion / tail / earnings / M&A / dilución).
+// El resto de items persistidos (5.02 exec, 5.07 voto, 7.01 Reg FD, 8.01 catch-all)
+// son rutinarios → capan el gate a WAIT en vez de bloquear todo.
+const HARD_EVENT_ITEMS = new Set([
+  "1.03", "2.04", "3.01", "4.02", "2.06", "2.05", "2.02", "5.01", "1.01", "2.01", "3.02", "1.05",
+])
+
 function computeSORE(
   m1NetGex: number,
   m1Pressure: number,
@@ -257,6 +264,8 @@ function computeSORE(
   // EDGAR F1/F2: opcionales — si vienen null, default neutral (no afectan)
   insiderSignal?: number | null,     // -1..+1 (net flow USD vs market cap, squashed tanh)
   shortRatioFloat?: number | null,   // 0..1 (shares short / float)
+  // M1: 8-K rutinario (no distress) → capa el gate a WAIT (no permite GO), sin forzar AVOID
+  eventSoftCap?: boolean,
 ): { css: number; dss: number; vss: number; vrp: number; strategy: string; gate: "GO" | "WAIT" | "AVOID" } {
   // DSS: Dealer Stabilization Score
   // GEX > 0 = dealers long gamma = buy dips / sell rips = stabilizing
@@ -330,6 +339,12 @@ function computeSORE(
   } else {
     gate = "WAIT"
     strategy = "CREDIT SPREAD"
+  }
+
+  // M1: un 8-K rutinario (5.02/5.07/7.01/8.01) no fuerza AVOID, pero impide GO (capa a WAIT).
+  if (eventSoftCap && gate === "GO") {
+    gate = "WAIT"
+    strategy = m6Regime === "COMPRESIÓN" ? "CREDIT SPREAD" : "BWB"
   }
 
   return { css, dss, vss, vrp, strategy, gate }
@@ -521,7 +536,8 @@ export async function GET(request: NextRequest) {
   const scoredSymbolIds = scored.map(s => s.symbolId).filter((x): x is string => !!x)
   const insiderMap = new Map<string, number>()    // symbolId → insiderSignal (-1..+1)
   const shortMap = new Map<string, number>()      // symbolId → shortRatioFloat (0..1)
-  const eventBlock = new Set<string>()            // symbolId con evento 8-K próximo → AVOID
+  const eventHard = new Set<string>()             // 8-K distress/earnings/M&A → AVOID forzado
+  const eventSoft = new Set<string>()             // 8-K rutinario (5.02/5.07/7.01/8.01) → cap a WAIT
   if (scoredSymbolIds.length > 0) {
     // Helper: fecha ISO (YYYY-MM-DD) de hace N días.
     const daysAgoISO = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString().slice(0, 10)
@@ -573,7 +589,9 @@ export async function GET(request: NextRequest) {
       if (r.short_ratio_float != null) shortMap.set(r.symbol_id, Number(r.short_ratio_float))
     }
     for (const r of eventRes.data ?? []) {
-      if (r.symbol_id) eventBlock.add(r.symbol_id)
+      if (!r.symbol_id) continue
+      if (HARD_EVENT_ITEMS.has(r.item_code)) eventHard.add(r.symbol_id)
+      else eventSoft.add(r.symbol_id)
     }
   }
 
@@ -599,7 +617,9 @@ export async function GET(request: NextRequest) {
           const shortRatioFloat = symbolId ? shortMap.get(symbolId) ?? null : null
           // F3 hard block: si hay 8-K filed en los últimos 4 días, force AVOID.
           // Pasamos m6Suspended=true al computeSORE (mismo codepath de pánico).
-          const blockedByEvent = symbolId ? eventBlock.has(symbolId) : false
+          const blockedByEvent = symbolId ? eventHard.has(symbolId) : false
+          // M1: evento 8-K rutinario (no hard) → cap a WAIT, no AVOID.
+          const softEvent = symbolId ? (eventSoft.has(symbolId) && !eventHard.has(symbolId)) : false
           // M8 gate de liquidez: si el subyacente no es operable (OI/volumen NTM
           // insuficientes), force AVOID por el mismo codepath. No vender prima en
           // opciones que luego no se pueden cerrar. Aditivo — no toca la matemática SORE.
@@ -610,6 +630,7 @@ export async function GET(request: NextRequest) {
             m6.signalSuspended || blockedByEvent || blockedByLiquidity,
             m5.score,
             insiderSignal, shortRatioFloat,
+            softEvent,
           );
 
           return {

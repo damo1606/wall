@@ -37,7 +37,7 @@ event_date futuro). Si es anticipatorio, necesitas el earnings calendar forward.
 
 ## 🟡 MEDIO
 
-### M1. Sobre-bloqueo: 18 item codes hacen AVOID por igual
+### M1. Sobre-bloqueo: 18 item codes hacen AVOID por igual — ✅ RESUELTO (hard AVOID vs soft cap a WAIT)
 El route persiste 18 items (`route.ts:13-35`) e incluye 2.02 (earnings), 5.02 (cambio
 ejecutivo), 5.07 (voto accionistas), 7.01 (Reg FD), 8.01 (catch-all) — todos comunes.
 El scanner bloquea ante **cualquiera** (`scanner-pro:548-550`) con la misma severidad que

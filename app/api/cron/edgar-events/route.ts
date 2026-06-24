@@ -9,14 +9,28 @@ const JOB_NAME = "edgar_events"
 const LOOKBACK_DAYS = 2  // capturamos filings de hoy y ayer
 
 // Items 8-K relevantes para SORE (vol spike risk). Los demás son ruido.
+// Todos se persisten (badges/radar). scanner-pro decide en consumo cuáles fuerzan
+// AVOID (hard: distress/earnings/M&A) y cuáles capan a WAIT (rutinarios) — ver M1.
 const RELEVANT_ITEMS: Record<string, string> = {
+  // --- Distress / tail-risk: los eventos de vol más extremos ---
+  "1.03": "Bankruptcy or Receivership (quiebra)",
+  "2.04": "Triggering Event — Acceleration of Financial Obligation (default deuda)",
+  "3.01": "Notice of Delisting / Failure to Satisfy Listing Rule",
+  "4.01": "Change in Certifying Accountant (cambio de auditor — red flag)",
+  "4.02": "Non-Reliance on Prior Financial Statements (restatement)",
+  // --- M&A / control / estructura de capital ---
   "1.01": "Material Definitive Agreement (M&A / contratos)",
+  "2.01": "Completion of Acquisition or Disposition of Assets",
+  "3.02": "Unregistered Sales of Equity Securities (dilución)",
+  "5.01": "Changes in Control of Registrant",
+  // --- Operativo / earnings / personas ---
   "2.02": "Results of Operations (earnings)",
   "2.05": "Costs Associated with Exit / Restructuring",
   "2.06": "Material Impairments",
-  "4.02": "Non-Reliance on Prior Financial Statements (restatement)",
   "5.02": "Departure / Appointment of CEO/CFO/Director",
   "5.07": "Shareholder Vote",
+  // --- Disclosure / catch-all ---
+  "1.05": "Material Cybersecurity Incident",
   "7.01": "Reg FD Disclosure (info material no programada)",
   "8.01": "Other Material Events",
 }
