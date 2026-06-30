@@ -472,11 +472,17 @@ export async function GET(request: NextRequest) {
   // resiliente a transitorios sin perder cobertura.
   const db = supabaseServer()
   const { data: syms } = await db.from("symbols")
-    .select("id, ticker")
+    .select("id, ticker, shares_outstanding")
     .in("ticker", symbols)
     .eq("is_active", true)
     .eq("asset_type", "stock")
   const symbolIds = (syms ?? []).map(s => s.id)
+  // #2: shares outstanding autoritativo de SEC (cron edgar-shares). Fallback para
+  // reconstruir market cap en F1 cuando Yahoo da 0 — ver bloque F1 abajo.
+  const secSharesMap = new Map<string, number>()
+  for (const s of syms ?? []) {
+    if (s.shares_outstanding != null) secSharesMap.set(s.id, Number(s.shares_outstanding))
+  }
   let scored: { symbolId?: string; stock: StockData; score: ScoreBreakdown }[] = []
   if (symbolIds.length > 0) {
     const cutoff = new Date(Date.now() - 5 * 86_400_000).toISOString()
@@ -572,7 +578,15 @@ export async function GET(request: NextRequest) {
     for (const r of insiderRes.data ?? []) {
       if (seenI.has(r.symbol_id)) continue
       seenI.add(r.symbol_id)
-      const mc = scoredById.get(r.symbol_id)?.stock?.marketCap ?? 0
+      const stock = scoredById.get(r.symbol_id)?.stock
+      let mc = stock?.marketCap ?? 0
+      // #2: cuando Yahoo no da market cap (0/stale) F1 se perdía (mc > 1e7 fallaba).
+      // Reconstruimos con shares outstanding autoritativo de SEC × precio actual.
+      if (mc <= 1e7) {
+        const secShares = secSharesMap.get(r.symbol_id)
+        const price = stock?.currentPrice
+        if (secShares && price && price > 0) mc = secShares * price
+      }
       if (mc > 1e7 && r.net_flow_usd != null) {
         // Factor calibrado para que el umbral de ban (signal < -0.7) caiga en
         // net_flow ≈ -2% del market cap (umbral documentado en la migración

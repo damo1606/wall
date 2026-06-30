@@ -2236,6 +2236,8 @@ export type Database = {
           is_active: boolean
           name: string
           sector_id: string | null
+          shares_outstanding: number | null
+          shares_outstanding_asof: string | null
           ticker: string
           updated_at: string
         }
@@ -2251,6 +2253,8 @@ export type Database = {
           is_active?: boolean
           name: string
           sector_id?: string | null
+          shares_outstanding?: number | null
+          shares_outstanding_asof?: string | null
           ticker: string
           updated_at?: string
         }
@@ -2266,6 +2270,8 @@ export type Database = {
           is_active?: boolean
           name?: string
           sector_id?: string | null
+          shares_outstanding?: number | null
+          shares_outstanding_asof?: string | null
           ticker?: string
           updated_at?: string
         }

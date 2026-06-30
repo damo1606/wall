@@ -125,6 +125,64 @@ export async function fetchFilingDocument(
   return await r.text()
 }
 
+// XBRL companyconcept: serie histórica de un concepto contable para un CIK.
+// Endpoint: https://data.sec.gov/api/xbrl/companyconcept/CIK{cik}/{taxonomy}/{tag}.json
+// Devuelve { units: { <unidad>: [ { end, val, fy, fp, form, filed, frame? }, ... ] } }.
+// taxonomy típico: "dei" (cover-page) o "us-gaap". Devuelve null si SEC no tiene
+// el concepto para esa entidad (404 frecuente y esperable, no es error).
+export type XbrlFact = {
+  end: string       // fecha del periodo/instante (YYYY-MM-DD)
+  val: number       // valor del hecho
+  fy?: number
+  fp?: string
+  form?: string     // ej. "10-K", "10-Q"
+  filed?: string    // fecha de filing (YYYY-MM-DD)
+  frame?: string
+}
+export type CompanyConceptResponse = {
+  units: Record<string, XbrlFact[]>
+}
+
+export async function fetchCompanyConcept(
+  cikPadded: string,
+  taxonomy: string,
+  tag: string,
+): Promise<CompanyConceptResponse | null> {
+  const url = `https://data.sec.gov/api/xbrl/companyconcept/CIK${cikPadded}/${taxonomy}/${tag}.json`
+  const r = await fetch(url, { headers: EDGAR_HEADERS, cache: "no-store" })
+  if (r.status === 404) return null
+  if (!r.ok) throw new Error(`SEC companyconcept ${taxonomy}/${tag} ${cikPadded} ${r.status}`)
+  return await r.json() as CompanyConceptResponse
+}
+
+// Shares outstanding autoritativo de SEC. Prioriza el concepto de portada
+// (dei:EntityCommonStockSharesOutstanding) — el recuento legal más reciente que
+// la empresa reporta en la carátula de su 10-Q/10-K — y cae a us-gaap si falta.
+// Devuelve el hecho con la fecha "end" más reciente (desempate por filed).
+export async function fetchSharesOutstanding(
+  cikPadded: string,
+): Promise<{ shares: number; asof: string } | null> {
+  const candidates: Array<[string, string]> = [
+    ["dei", "EntityCommonStockSharesOutstanding"],
+    ["us-gaap", "CommonStockSharesOutstanding"],
+  ]
+  for (const [taxonomy, tag] of candidates) {
+    let resp: CompanyConceptResponse | null
+    try { resp = await fetchCompanyConcept(cikPadded, taxonomy, tag) } catch { resp = null }
+    const facts = resp?.units?.["shares"]
+    if (!facts || facts.length === 0) continue
+    let best: XbrlFact | null = null
+    for (const f of facts) {
+      if (!Number.isFinite(f.val) || f.val <= 0 || !f.end) continue
+      if (!best || f.end > best.end || (f.end === best.end && (f.filed ?? "") > (best.filed ?? ""))) {
+        best = f
+      }
+    }
+    if (best) return { shares: Math.round(best.val), asof: best.end }
+  }
+  return null
+}
+
 // SEC para Forms 3/4/5 expone primaryDocument apuntando a la versión HTML
 // renderizada (con prefijo xslF345XNN/). El XML crudo está en la misma carpeta
 // sin ese prefijo. Esta función traduce el primaryDocument al path del XML.
