@@ -1,5 +1,7 @@
 import { unstable_cache } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { verifyToken, SESSION_COOKIE } from '@/lib/auth'
 import { fetchStockData, validateTickers, type StockData } from '@/lib/yahoo'
 
 // ── Environment Configuration ─────────────────────────────────────────────────
@@ -12,6 +14,7 @@ const DEFAULT_MODEL = 'google/gemini-2.5-flash'
 
 const HTTP_STATUS = {
   BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
   UNPROCESSABLE_ENTITY: 422,
 } as const
 
@@ -344,6 +347,16 @@ export function createCadenasHandler(
   analyzer: (sector: string, subsector: string, tickers: string[]) => Promise<AnalysisResult>
 ) {
   return async (req: NextRequest) => {
+    // Cada análisis dispara una llamada LLM de pago (OpenRouter): solo
+    // usuarios con sesión válida pueden invocarlo, o cualquiera podría
+    // generar coste ilimitado contra la API key.
+    try {
+      const token = (await cookies()).get(SESSION_COOKIE)?.value
+      if (!token) throw new Error('sin sesión')
+      await verifyToken(token)
+    } catch {
+      return NextResponse.json({ error: 'No autenticado' }, { status: HTTP_STATUS.UNAUTHORIZED })
+    }
     try {
       const body = await req.json()
       const { sector, subsector } = body
