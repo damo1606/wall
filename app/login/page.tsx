@@ -23,7 +23,11 @@ export default function LoginPage() {
 
     if (res.ok) {
       sessionStorage.setItem("sore_active", "1");
-      router.push("/gex");
+      // Vuelve a la página que originó la redirección del proxy. Solo rutas
+      // internas ("/..." pero no "//host"): evita open redirects.
+      const next = new URLSearchParams(window.location.search).get("next");
+      const dest = next && next.startsWith("/") && !next.startsWith("//") ? next : "/gex";
+      router.push(dest);
       router.refresh();
     } else {
       const json = await res.json();
