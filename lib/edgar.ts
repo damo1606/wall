@@ -183,6 +183,34 @@ export async function fetchSharesOutstanding(
   return null
 }
 
+// XBRL companyfacts: TODOS los conceptos contables de un CIK en una sola llamada.
+// Endpoint: https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json
+// Shape: { cik, entityName, facts: { "us-gaap": { <tag>: { units: { USD: [fact...] } } }, "dei": {...} } }.
+// Preferido sobre companyconcept por-tag cuando necesitas muchos line items (1 request
+// vs N). El JSON es grande (1–5MB): parsea, extrae lo tuyo y descarta. 404 → null.
+export type XbrlConcept = {
+  label?: string
+  description?: string
+  units: Record<string, XbrlFact[]>
+}
+export type CompanyFactsResponse = {
+  cik: number
+  entityName: string
+  facts: Record<string, Record<string, XbrlConcept>>  // taxonomy → tag → concepto
+}
+
+export async function fetchCompanyFacts(
+  cikPadded: string,
+): Promise<CompanyFactsResponse | null> {
+  const r = await fetch(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cikPadded}.json`, {
+    headers: EDGAR_HEADERS,
+    cache: "no-store",
+  })
+  if (r.status === 404) return null
+  if (!r.ok) throw new Error(`SEC companyfacts ${cikPadded} ${r.status}`)
+  return await r.json() as CompanyFactsResponse
+}
+
 // SEC para Forms 3/4/5 expone primaryDocument apuntando a la versión HTML
 // renderizada (con prefijo xslF345XNN/). El XML crudo está en la misma carpeta
 // sin ese prefijo. Esta función traduce el primaryDocument al path del XML.

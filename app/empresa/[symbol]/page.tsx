@@ -271,6 +271,34 @@ function ForecastSection({ symbol }: { symbol: string }) {
 
 // ─── Página ──────────────────────────────────────────────────────────────────
 
+// Respuesta de /api/financials/[symbol] (estados EDGAR + derivados).
+type FinancialsResp = {
+  hasData: boolean
+  periodEnd?: string | null
+  form?: string | null
+  lineItems?: {
+    totalAssets: number | null; totalLiabilities: number | null; cash: number | null
+    revenue: number | null; netIncome: number | null
+    longTermDebt: number | null; shortTermDebt: number | null
+  }
+  derived?: {
+    netDebt: number | null
+    ncav: { total: number; perShare: number | null } | null
+    altmanZ: { z: number | null; zone: string | null; reason?: string }
+    marketCapUsed: number | null
+    isFinancial: boolean
+  }
+}
+
+// Formatea USD en B/M/K con signo (line items de estados financieros).
+function bmt(v: number): string {
+  const a = Math.abs(v)
+  return a >= 1e9 ? `$${(v / 1e9).toFixed(1)}B`
+    : a >= 1e6 ? `$${(v / 1e6).toFixed(0)}M`
+    : a >= 1e3 ? `$${(v / 1e3).toFixed(0)}K`
+    : `$${v.toFixed(0)}`
+}
+
 export default function EmpresaPage() {
   const params = useParams()
   const symbol = (params.symbol as string).toUpperCase()
@@ -283,6 +311,7 @@ export default function EmpresaPage() {
   const [fetchedAt,  setFetchedAt]    = useState<string | null>(null)
   const [news,       setNews]         = useState<{ title: string; publisher: string; link: string; publishedAt: string }[]>([])
   const [ivData,     setIvData]       = useState<{ atmIv: number; ivRank: number | null; ivPercentile: number | null; samples: number } | null>(null)
+  const [fin,        setFin]          = useState<FinancialsResp | null>(null)
 
   useEffect(() => {
     getPortfolio().then(p => setInPortfolio(p.some(e => e.symbol === symbol)))
@@ -326,6 +355,14 @@ export default function EmpresaPage() {
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.atmIv) setIvData(d) })
       .catch(e => console.error('[IV] fetch failed:', e))
+  }, [symbol])
+
+  useEffect(() => {
+    setFin(null)
+    fetch(`/api/financials/${symbol}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setFin(d) })
+      .catch(() => {})
   }, [symbol])
 
   if (loading) return (
@@ -709,6 +746,46 @@ export default function EmpresaPage() {
                   </a>
                 )
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Estados financieros (SEC/XBRL) */}
+        {fin?.hasData && fin.derived && (
+          <div className="mt-6 bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">
+              Estados financieros (SEC){fin.periodEnd ? ` · FY ${fin.periodEnd}` : ""}
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <MetricRow label="Altman Z-score"
+                  value={fin.derived.altmanZ.z != null ? fin.derived.altmanZ.z.toFixed(2) : "—"}
+                  good={fin.derived.altmanZ.zone === "safe" ? true : fin.derived.altmanZ.zone === "distress" ? false : null} />
+                <MetricRow label="Zona" value={
+                  fin.derived.altmanZ.zone === "safe" ? "Segura (>2.99)" :
+                  fin.derived.altmanZ.zone === "grey" ? "Gris (1.81–2.99)" :
+                  fin.derived.altmanZ.zone === "distress" ? "Distress (<1.81)" : "—"} />
+                <MetricRow label="Deuda neta" value={fin.derived.netDebt != null ? bmt(fin.derived.netDebt) : "—"}
+                  good={fin.derived.netDebt != null ? fin.derived.netDebt <= 0 : null} />
+                <MetricRow label="VLN (NCAV)" value={fin.derived.ncav ? bmt(fin.derived.ncav.total) : "—"}
+                  good={fin.derived.ncav ? fin.derived.ncav.total > 0 : null} />
+                <MetricRow label="VLN / acción" value={fin.derived.ncav?.perShare != null ? usd(fin.derived.ncav.perShare) : "—"} />
+              </div>
+              <div>
+                <MetricRow label="Activos totales" value={fin.lineItems?.totalAssets != null ? bmt(fin.lineItems.totalAssets) : "—"} />
+                <MetricRow label="Pasivos totales" value={fin.lineItems?.totalLiabilities != null ? bmt(fin.lineItems.totalLiabilities) : "—"} />
+                <MetricRow label="Caja" value={fin.lineItems?.cash != null ? bmt(fin.lineItems.cash) : "—"} />
+                <MetricRow label="Deuda LP" value={fin.lineItems?.longTermDebt != null ? bmt(fin.lineItems.longTermDebt) : "—"} />
+                <MetricRow label="Deuda CP" value={fin.lineItems?.shortTermDebt != null ? bmt(fin.lineItems.shortTermDebt) : "—"} />
+              </div>
+              <div>
+                <MetricRow label="Ingresos (FY)" value={fin.lineItems?.revenue != null ? bmt(fin.lineItems.revenue) : "—"} />
+                <MetricRow label="Beneficio neto (FY)" value={fin.lineItems?.netIncome != null ? bmt(fin.lineItems.netIncome) : "—"}
+                  good={fin.lineItems?.netIncome != null ? fin.lineItems.netIncome > 0 : null} />
+              </div>
+            </div>
+            <div className="text-[10px] text-gray-600 mt-3">
+              Fuente: SEC EDGAR / XBRL{fin.derived.isFinancial ? " · Altman Z no aplica a financieras" : ""}
             </div>
           </div>
         )}

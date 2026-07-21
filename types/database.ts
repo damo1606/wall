@@ -1153,6 +1153,96 @@ export type Database = {
           },
         ]
       }
+      edgar_financials: {
+        Row: {
+          cash: number | null
+          cogs: number | null
+          cron_run_id: string | null
+          current_assets: number | null
+          current_liabilities: number | null
+          dep_amort: number | null
+          fiscal_period: string
+          form: string | null
+          gross_profit: number | null
+          id: string
+          long_term_debt: number | null
+          net_income: number | null
+          operating_income: number | null
+          period_end: string
+          retained_earnings: number | null
+          revenue: number | null
+          short_term_debt: number | null
+          source: string
+          stockholders_equity: number | null
+          symbol_id: string
+          total_assets: number | null
+          total_liabilities: number | null
+        }
+        Insert: {
+          cash?: number | null
+          cogs?: number | null
+          cron_run_id?: string | null
+          current_assets?: number | null
+          current_liabilities?: number | null
+          dep_amort?: number | null
+          fiscal_period: string
+          form?: string | null
+          gross_profit?: number | null
+          id?: string
+          long_term_debt?: number | null
+          net_income?: number | null
+          operating_income?: number | null
+          period_end: string
+          retained_earnings?: number | null
+          revenue?: number | null
+          short_term_debt?: number | null
+          source?: string
+          stockholders_equity?: number | null
+          symbol_id: string
+          total_assets?: number | null
+          total_liabilities?: number | null
+        }
+        Update: {
+          cash?: number | null
+          cogs?: number | null
+          cron_run_id?: string | null
+          current_assets?: number | null
+          current_liabilities?: number | null
+          dep_amort?: number | null
+          fiscal_period?: string
+          form?: string | null
+          gross_profit?: number | null
+          id?: string
+          long_term_debt?: number | null
+          net_income?: number | null
+          operating_income?: number | null
+          period_end?: string
+          retained_earnings?: number | null
+          revenue?: number | null
+          short_term_debt?: number | null
+          source?: string
+          stockholders_equity?: number | null
+          symbol_id?: string
+          total_assets?: number | null
+          total_liabilities?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "edgar_financials_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "edgar_financials_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       insider_flows: {
         Row: {
           buy_usd: number

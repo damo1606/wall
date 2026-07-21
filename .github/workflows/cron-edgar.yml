@@ -5,6 +5,7 @@ name: EDGAR (SEC) — crons
 #   - insiders (manual + diario 04:00 UTC): Form 4, agrega insider_flows
 #   - events (manual + 3×/día): 8-K material events (F3)
 #   - shares (manual + semanal sáb 06:00 UTC): shares_outstanding vía XBRL
+#   - financials (manual + semanal dom 06:00 UTC): estados financieros vía XBRL companyfacts
 
 on:
   workflow_dispatch:
@@ -19,6 +20,7 @@ on:
           - insiders
           - events
           - shares
+          - financials
   schedule:
     # Insiders Form 4 — diario 04:00 UTC (lun-vie)
     - cron: '0 4 * * 1-5'
@@ -28,6 +30,9 @@ on:
     # Shares outstanding — semanal (sábado 06:00 UTC). Solo cambia con cada
     # 10-Q/10-K (trimestral), así que un refresco semanal es de sobra.
     - cron: '0 6 * * 6'
+    # Estados financieros — semanal (domingo 06:00 UTC). Igual que shares, solo
+    # cambian con cada 10-Q/10-K.
+    - cron: '0 6 * * 0'
 
 concurrency:
   group: cron-edgar-${{ github.event.inputs.job || github.event.schedule }}
@@ -151,6 +156,40 @@ jobs:
             DONE=$(jq -r '.done' /tmp/r.json)
             NEXT=$(jq -r '.next_batch_start' /tmp/r.json)
             if [ "$DONE" = "true" ]; then echo "✓ shares completos"; break; fi
+            if [ "$NEXT" = "null" ] || [ -z "$NEXT" ]; then echo "::warning::sin next; corto"; break; fi
+            BATCH_START=$NEXT
+            sleep 5
+          done
+
+  financials:
+    name: EDGAR — estados financieros (XBRL companyfacts, paginated)
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'financials') ||
+      (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 0')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Iterar batches de /api/cron/edgar-financials
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT:    https://wall-livid.vercel.app/api/cron/edgar-financials
+          BATCH_SIZE:  '50'
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then echo "::error::CRON_SECRET no configurado"; exit 1; fi
+          BATCH_START=0; N=0
+          while true; do
+            N=$((N+1))
+            URL="${ENDPOINT}?batch_start=${BATCH_START}&batch_size=${BATCH_SIZE}"
+            STATUS=$(curl -sS -X GET "$URL" -H "Authorization: Bearer $CRON_SECRET" \
+              -H "User-Agent: gha-edgar-financials" --max-time 290 \
+              -o /tmp/r.json -w "%{http_code}")
+            echo "Batch #$N HTTP $STATUS"
+            cat /tmp/r.json | jq . || cat /tmp/r.json
+            if [ "$STATUS" != "200" ]; then echo "::error::batch #$N falló"; exit 1; fi
+            DONE=$(jq -r '.done' /tmp/r.json)
+            NEXT=$(jq -r '.next_batch_start' /tmp/r.json)
+            if [ "$DONE" = "true" ]; then echo "✓ financials completos"; break; fi
             if [ "$NEXT" = "null" ] || [ -z "$NEXT" ]; then echo "::warning::sin next; corto"; break; fi
             BATCH_START=$NEXT
             sleep 5
