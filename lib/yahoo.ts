@@ -235,9 +235,16 @@ export type StockData = {
   discountToLynch: number
 
   // Analistas
-  analystTarget: number
+  analystTarget: number       // targetMeanPrice — se conserva por compatibilidad
   upsideToTarget: number
   analystCount: number
+  // Rango completo de objetivos y rating agregado. null = Yahoo no lo publica
+  // (distinto de 0, que aquí significaría "objetivo de cero dólares").
+  analystTargetHigh: number | null
+  analystTargetLow: number | null
+  analystTargetMedian: number | null
+  recommendationMean: number | null   // 1 = strong buy … 5 = sell
+  recommendationKey: string | null    // "strong_buy" | "buy" | "hold" | …
 
   // Calidad
   roe: number
@@ -421,6 +428,17 @@ export async function fetchStockData(symbol: string, calendar = false): Promise<
     const upsideToTarget = analystTarget > 0 && currentPrice > 0
       ? ((analystTarget - currentPrice) / currentPrice) * 100 : 0
 
+    // Rango completo + rating agregado. `?? null` en vez de `?? 0`: un objetivo
+    // ausente no es un objetivo de cero, y el escenario necesita distinguirlos.
+    const num = (v: unknown): number | null =>
+      typeof v === "number" && Number.isFinite(v) ? v : null
+    const analystTargetHigh   = num(financial.targetHighPrice?.raw)
+    const analystTargetLow    = num(financial.targetLowPrice?.raw)
+    const analystTargetMedian = num(financial.targetMedianPrice?.raw)
+    const recommendationMean  = num(financial.recommendationMean?.raw)
+    const recommendationKey   = typeof financial.recommendationKey === "string"
+      ? financial.recommendationKey : null
+
     const freeCashflow     = financial.freeCashflow?.raw      ?? 0
     const sharesOutstanding = stats.sharesOutstanding?.raw    ?? 0
     const fcfPerShare       = sharesOutstanding > 0 ? freeCashflow / sharesOutstanding : 0
@@ -514,6 +532,11 @@ export async function fetchStockData(symbol: string, calendar = false): Promise<
       analystTarget,
       upsideToTarget,
       analystCount: financial.numberOfAnalystOpinions?.raw ?? 0,
+      analystTargetHigh,
+      analystTargetLow,
+      analystTargetMedian,
+      recommendationMean,
+      recommendationKey,
 
       roe,
       roa,

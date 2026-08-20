@@ -3,6 +3,7 @@ import { getCrumb, fetchStockData } from "@/lib/yahoo";
 import { supabaseServer } from "@/lib/supabase";
 import type { StockData } from "@/lib/yahoo";
 import type { ScoreBreakdown } from "@/lib/scoring";
+import { buildAnalystConsensus } from "@/lib/analyst-consensus";
 
 // Sin esto Next.js trata el GET como static/cacheable y, cuando el cron snapshot
 // lo llama internamente, recibe una versión cacheada antigua (~5 filas) en vez
@@ -73,15 +74,28 @@ async function fetchHistory(
   return { current: valid[valid.length - 1] ?? 0, history: valid };
 }
 
-function extractRaw(opts: any) {
+// Contrato crudo de la cadena de Yahoo — solo los campos que consumimos.
+type YahooRawOption = {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+  volume?: number;
+};
+
+type YahooOptionsData = {
+  calls?: YahooRawOption[];
+  puts?: YahooRawOption[];
+};
+
+function extractRaw(opts: YahooOptionsData) {
   return {
-    calls: (opts?.calls ?? []).map((c: any) => ({
+    calls: (opts?.calls ?? []).map((c) => ({
       strike: c.strike ?? 0,
       impliedVolatility: c.impliedVolatility ?? 0,
       openInterest: c.openInterest ?? 0,
       volume: c.volume ?? 0,
     })),
-    puts: (opts?.puts ?? []).map((p: any) => ({
+    puts: (opts?.puts ?? []).map((p) => ({
       strike: p.strike ?? 0,
       impliedVolatility: p.impliedVolatility ?? 0,
       openInterest: p.openInterest ?? 0,
@@ -123,10 +137,10 @@ async function fetchMarketRegime(cookie: string, crumb: string): Promise<Analysi
   const expTs: number = spyResult.expirationDates?.[0] ?? 0;
   const T = Math.max((new Date(expTs * 1000).getTime() - today.getTime()) / (365 * 24 * 60 * 60 * 1000), 0.001);
 
-  const spyCalls = (spyOptData.calls ?? []).map((c: any) => ({
+  const spyCalls = (spyOptData.calls ?? []).map((c: YahooRawOption) => ({
     strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0, openInterest: c.openInterest ?? 0,
   }));
-  const spyPuts = (spyOptData.puts ?? []).map((p: any) => ({
+  const spyPuts = (spyOptData.puts ?? []).map((p: YahooRawOption) => ({
     strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0, openInterest: p.openInterest ?? 0,
   }));
 
@@ -496,7 +510,26 @@ export async function GET(request: NextRequest) {
     for (const r of scoreRows ?? []) {
       if (latestBySymbol.has(r.symbol_id)) continue
       const c = r.components as unknown as { stock?: StockData; score?: ScoreBreakdown } | null
-      if (c?.stock && c?.score) latestBySymbol.set(r.symbol_id, { symbolId: r.symbol_id, stock: c.stock, score: c.score })
+      if (c?.stock && c?.score) {
+        // Las filas escritas antes del consenso de analistas no traen
+        // `score.consensus`, y leerlo a ciegas rompería el endpoint hasta que el
+        // cron repueble. Se reconstruye con lo que haya en el blob: si el `stock`
+        // cacheado tampoco tiene el rango ni el rating, el escenario degrada
+        // solo a la rama base sobre la media, que es lo que esa fila sabe.
+        const score = c.score.consensus
+          ? c.score
+          : { ...c.score, consensus: buildAnalystConsensus({
+              currentPrice:       c.stock.currentPrice ?? 0,
+              targetMean:         (c.stock.analystTarget ?? 0) > 0 ? c.stock.analystTarget : null,
+              targetMedian:       c.stock.analystTargetMedian ?? null,
+              targetHigh:         c.stock.analystTargetHigh   ?? null,
+              targetLow:          c.stock.analystTargetLow    ?? null,
+              analystCount:       c.stock.analystCount ?? 0,
+              recommendationMean: c.stock.recommendationMean  ?? null,
+              recommendationKey:  c.stock.recommendationKey   ?? null,
+            }) }
+        latestBySymbol.set(r.symbol_id, { symbolId: r.symbol_id, stock: c.stock, score })
+      }
     }
     scored = [...latestBySymbol.values()]
       .filter(({ score }) => score.buyScore >= minBuyScore)
@@ -533,8 +566,8 @@ export async function GET(request: NextRequest) {
   let m6: Analysis6Result;
   try {
     m6 = await getCachedM6(cookie, crumb);
-  } catch (e: any) {
-    return NextResponse.json({ error: `Régimen M6: ${e.message}` }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: `Régimen M6: ${e instanceof Error ? e.message : String(e)}` }, { status: 500 });
   }
 
   // 4b. EDGAR F1+F2+F3: bulk queries de insider_flows, short_interest y
@@ -623,7 +656,7 @@ export async function GET(request: NextRequest) {
           );
 
           const m2PressureMax = m2.filteredStrikes.length > 0
-            ? Math.max(...m2.filteredStrikes.map((s: any) => s.institutionalPressure))
+            ? Math.max(...m2.filteredStrikes.map((s) => s.institutionalPressure))
             : 0;
 
           const conviction = calcConviction(score.buyScore, m7.finalScore, true);
@@ -657,7 +690,7 @@ export async function GET(request: NextRequest) {
             dropFrom52w: stock.dropFrom52w ?? 0,
             grahamNumber: stock.grahamNumber ?? 0,
             discountToGraham: stock.discountToGraham ?? 0,
-            upsideToTarget: stock.upsideToTarget ?? 0,
+            upsideToTarget: score.consensus.expectedUpside ?? 0,
             pe: stock.pe ?? 0,
             roe: stock.roe ?? 0,
             m1Pressure: m1.institutionalPressure,
@@ -670,7 +703,7 @@ export async function GET(request: NextRequest) {
             m2Support: m2.support,
             m2Resistance: m2.resistance,
             m3Confluence: m3.filteredStrikes.length > 0
-              ? parseFloat(Math.max(...m3.filteredStrikes.map((s: any) => Math.abs(s.confluenceScore))).toFixed(2))
+              ? parseFloat(Math.max(...m3.filteredStrikes.map((s) => Math.abs(s.confluenceScore))).toFixed(2))
               : 0,
             m3SupportConf: m3.supportConfidence ?? 0,
             m3ResistanceConf: m3.resistanceConfidence ?? 0,
@@ -728,7 +761,7 @@ export async function GET(request: NextRequest) {
             dropFrom52w: stock.dropFrom52w ?? 0,
             grahamNumber: stock.grahamNumber ?? 0,
             discountToGraham: stock.discountToGraham ?? 0,
-            upsideToTarget: stock.upsideToTarget ?? 0,
+            upsideToTarget: score.consensus.expectedUpside ?? 0,
             pe: stock.pe ?? 0,
             roe: stock.roe ?? 0,
             m1Pressure: 0, m1Support: 0, m1Resistance: 0,

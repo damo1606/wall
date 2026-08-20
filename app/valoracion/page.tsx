@@ -1,7 +1,6 @@
 "use client"
 
-import { useState } from "react"
-import Link from "next/link"
+import { useState, useRef } from "react"
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS, RUSSELL2000_SYMBOLS, QUANTUM_SYMBOLS, BIOTECH_SMALL_SYMBOLS, TECH_SMALL_SYMBOLS, CONSUMER_SMALL_SYMBOLS } from "@/lib/symbols"
 import { scoreStock } from "@/lib/scoring"
 import { analyzeForward } from "@/lib/forward"
@@ -28,7 +27,6 @@ function pct(v: number, dec = 1) {
   return `${v >= 0 ? "+" : ""}${v.toFixed(dec)}%`
 }
 function usd(v: number) { return v > 0 ? `$${v.toFixed(2)}` : "—" }
-function fmt(v: number, dec = 1) { return v !== 0 ? v.toFixed(dec) : "—" }
 
 function GradeBadge({ grade }: { grade: string }) {
   const color =
@@ -101,7 +99,8 @@ export default function Parte1() {
   const [sectorFilter, setSectorFilter] = useState<string>("all")
   const [sortBy1, setSortBy1]   = useState<SortCol1>("final")
   const [sortDir1, setSortDir1] = useState<"asc" | "desc">("desc")
-  const runningRef = { current: false }
+  // Ref real (persistente entre renders) para poder cortar el escaneo en curso
+  const runningRef = useRef(false)
 
   function handleSort1(col: SortCol1) {
     if (sortBy1 === col) setSortDir1(d => d === "desc" ? "asc" : "desc")
@@ -134,7 +133,6 @@ export default function Parte1() {
     }
 
     if (!runningRef.current) return
-    const GRADE_ORDER = ["F", "D", "C", "B", "A", "A+"]
     results.sort((a, b) => b.score.finalScore - a.score.finalScore)
     setStocks(results)
     setLoading(false)
@@ -522,10 +520,24 @@ export default function Parte1() {
                         </div>
                         <div>
                           <div className="text-xs text-gray-500 mb-1.5 font-semibold">Analistas</div>
-                          <Metric label="Target" value={usd(s.analystTarget)} good={null} />
-                          <Metric label="Upside" value={pct(s.upsideToTarget)}
-                            good={s.upsideToTarget >= 15} />
-                          <Metric label="# Analistas" value={s.analystCount > 0 ? String(s.analystCount) : "—"} good={null} />
+                          <Metric label="Rango" value={
+                            s.score.consensus.scenarios.length === 3
+                              ? `${usd(s.score.consensus.scenarios[0].price)}–${usd(s.score.consensus.scenarios[2].price)}`
+                              : usd(s.score.consensus.base?.price ?? 0)
+                          } good={null} />
+                          <Metric label="Esperado" value={usd(s.score.consensus.expectedPrice ?? 0)} good={null} />
+                          <Metric label="Upside esp." value={pct(s.score.consensus.expectedUpside ?? 0)}
+                            good={(s.score.consensus.expectedUpside ?? 0) >= 15} />
+                          <Metric label="Consenso" value={
+                            s.score.consensus.rating
+                              ? `${s.score.consensus.rating.label} (${s.score.consensus.count})`
+                              : s.score.consensus.count > 0 ? `${s.score.consensus.count} analistas` : "—"
+                          } good={s.score.consensus.rating ? s.score.consensus.rating.mean <= 2.5 : null} />
+                          <Metric label="Dispersión" value={
+                            s.score.consensus.dispersion !== null
+                              ? `${s.score.consensus.dispersion.toFixed(0)}% · ${s.score.consensus.dispersionLabel}`
+                              : "—"
+                          } good={s.score.consensus.dispersionLabel === null ? null : s.score.consensus.dispersionLabel !== "DISPERSO"} />
                           <Metric label="PEG" value={s.peg > 0 ? s.peg.toFixed(2) : "—"}
                             good={s.peg > 0 ? s.peg < 1.5 : null} />
                         </div>
