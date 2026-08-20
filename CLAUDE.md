@@ -11,7 +11,7 @@ Key routing rules:
 - Bugs, errors, "why is this broken", 500 errors → invoke investigate
 - Ship, deploy, push, create PR → invoke ship
 - QA, test the site, find bugs → invoke qa
-- Code review, check my diff → invoke review
+- Review a GitHub PR → invoke review (built-in); for the working diff use /code-review
 - Update docs after shipping → invoke document-release
 - Weekly retro → invoke retro
 - Design system, brand → invoke design-consultation
