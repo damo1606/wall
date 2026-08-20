@@ -264,6 +264,16 @@ function avg(vals: (number | null | undefined)[]): number {
   return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : 50
 }
 
+// Media ponderada que ignora los componentes ausentes y renormaliza los pesos
+// sobre los presentes — si falta una señal, el resto reparte su peso en vez de
+// arrastrar el score hacia el neutro.
+export function weightedAvg(pairs: [number | null | undefined, number][]): number {
+  const present = pairs.filter((p): p is [number, number] => p[0] != null)
+  const wSum = present.reduce((a, [, w]) => a + w, 0)
+  if (!present.length || wSum <= 0) return 50
+  return present.reduce((a, [v, w]) => a + v * w, 0) / wSum
+}
+
 export function computeMacroScore(
   data: MacroData,
   vix:   number | null = null,
@@ -319,18 +329,13 @@ export function computeMacroScore(
     if (v == null) return null
     return clamp(v < 2 ? 82 : v < 3 ? 64 : v < 4 ? 44 : 20)
   })()
-  const creditScore = clamp(
-    avg([
-      hyScore    != null ? hyScore * 0.5    : null,
-      stressScore!= null ? stressScore* 0.35 : null,
-      delinqScore!= null ? delinqScore* 0.15 : null,
-    ].map((v, i) => {
-      if (v == null) return null
-      const weights = [0.5, 0.35, 0.15]
-      const raws    = [hyScore, stressScore, delinqScore]
-      return raws[i] != null ? raws[i]! : null
-    }))
-  )
+  // El spread HY manda: es la señal de crédito más rápida y líquida. La morosidad
+  // pesa poco porque llega con meses de retraso.
+  const creditScore = clamp(weightedAvg([
+    [hyScore,     0.50],
+    [stressScore, 0.35],
+    [delinqScore, 0.15],
+  ]))
 
   // ── Inflación / Fed (20%) ──────────────────────────────────────────────────
   const cpiScore = (() => {
@@ -347,15 +352,12 @@ export function computeMacroScore(
     const trend = data.fedRate?.trend
     return trend === "up" ? 38 : trend === "down" ? 62 : 55
   })()
-  const inflationScore = clamp(avg([
-    cpiScore != null ? cpiScore * 0.3  : null,
-    ycScore  != null ? ycScore  * 0.45 : null,
-    fedScore * 0.25,
-  ].map((v, i) => {
-    const raws    = [cpiScore, ycScore, fedScore]
-    const weights = [0.3, 0.45, 0.25]
-    return raws[i] != null ? raws[i]! : null
-  })))
+  // La curva de tipos pesa más que el CPI: anticipa el ciclo en vez de describirlo.
+  const inflationScore = clamp(weightedAvg([
+    [cpiScore, 0.30],
+    [ycScore,  0.45],
+    [fedScore, 0.25],
+  ]))
 
   // ── Volatilidad (20%) ─────────────────────────────────────────────────────
   const vixScore = (() => {
@@ -405,7 +407,8 @@ export function computeMacroScore(
 
 export function computeExpectationShift(
   data:  MacroData,
-  vix:   number | null = null,
+  // `vix` no se usa en el cálculo pero se mantiene por compatibilidad posicional con los llamadores
+  vix:   number | null,
   vix9d: number | null = null,
   vix3m: number | null = null,
 ): ExpectationShift {
