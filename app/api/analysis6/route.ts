@@ -8,6 +8,13 @@ const HEADERS = {
   Referer: "https://finance.yahoo.com/",
 };
 
+// Contrato crudo de la cadena de opciones de Yahoo Finance (solo los campos que usamos).
+interface YahooOptionContract {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+}
+
 async function getCredentials(): Promise<{ crumb: string; cookie: string }> {
   const res1 = await fetch("https://fc.yahoo.com", { headers: HEADERS, redirect: "follow" });
   const setCookie = res1.headers.get("set-cookie") ?? "";
@@ -77,14 +84,14 @@ export async function GET(request: NextRequest) {
     const vixHistory = vixData.history;
 
     // HYG 5d change
-    const hygHistory = (hygData as any).history as number[];
+    const hygHistory = hygData.history;
     const hygOldest  = hygHistory[0] ?? 0;
-    const hygCurrent = (hygData as any).current as number;
+    const hygCurrent = hygData.current;
     const hygChange5d = hygOldest > 0 ? ((hygCurrent - hygOldest) / hygOldest) * 100 : 0;
 
     // SPY vs SMA50
-    const spyHistArr = (spyHistory as any).history as number[];
-    const spyCurrent = (spyHistory as any).current as number;
+    const spyHistArr = spyHistory.history;
+    const spyCurrent = spyHistory.current;
     const last50 = spyHistArr.slice(-50);
     const sma50  = last50.length > 0 ? last50.reduce((a: number, b: number) => a + b, 0) / last50.length : spyCurrent;
     const spyVsSma50 = sma50 > 0 ? ((spyCurrent - sma50) / sma50) * 100 : 0;
@@ -98,10 +105,10 @@ export async function GET(request: NextRequest) {
     const expDate = new Date(expTs * 1000);
     const T = Math.max((expDate.getTime() - today.getTime()) / (365 * 24 * 60 * 60 * 1000), 0.001);
 
-    const calls = (optData.calls ?? []).map((c: any) => ({
+    const calls = (optData.calls ?? []).map((c: YahooOptionContract) => ({
       strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0, openInterest: c.openInterest ?? 0,
     }));
-    const puts = (optData.puts ?? []).map((p: any) => ({
+    const puts = (optData.puts ?? []).map((p: YahooOptionContract) => ({
       strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0, openInterest: p.openInterest ?? 0,
     }));
 
@@ -111,8 +118,8 @@ export async function GET(request: NextRequest) {
     // Compute lead indicators
     result.leadIndicators = leadRaw.map(([histData, optResult], i) => {
       const sym   = leadSymbols[i];
-      const spot  = (histData as any).current ?? 0;
-      const hist  = (histData as any).history ?? [];
+      const spot  = histData.current ?? 0;
+      const hist  = histData.history ?? [];
 
       if (!optResult || spot === 0) {
         return { symbol: sym, spot: 0, change1d: 0, change5d: 0, gexSign: "NEGATIVO" as const, pcr: 1, signal: "NEUTRO" as const, leadNote: "Sin datos disponibles" };
@@ -123,15 +130,18 @@ export async function GET(request: NextRequest) {
       const optData2 = optResult.options?.[0];
       if (!optData2) return { symbol: sym, spot, change1d: 0, change5d: 0, gexSign: "NEGATIVO" as const, pcr: 1, signal: "NEUTRO" as const, leadNote: "Sin cadena de opciones" };
 
-      const c2 = (optData2.calls ?? []).map((c: any) => ({ strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0, openInterest: c.openInterest ?? 0 }));
-      const p2 = (optData2.puts  ?? []).map((p: any) => ({ strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0, openInterest: p.openInterest ?? 0 }));
+      const c2 = (optData2.calls ?? []).map((c: YahooOptionContract) => ({ strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0, openInterest: c.openInterest ?? 0 }));
+      const p2 = (optData2.puts  ?? []).map((p: YahooOptionContract) => ({ strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0, openInterest: p.openInterest ?? 0 }));
       const { gexTotal, pcr } = computeSpyMetrics(c2, p2, spot, T2);
 
       return computeLeadIndicator(sym, spot, hist, gexTotal, pcr);
     });
 
     return NextResponse.json(result);
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }

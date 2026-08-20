@@ -108,10 +108,10 @@ function verdictBorder(v: string) {
 function PrimarySetupCard({
   cluster,
   type,
-  spot,
 }: {
   cluster: SRCluster | null;
   type: "long" | "short";
+  // `spot` sigue en el tipo porque los call-sites lo pasan, pero no se usa aquí
   spot: number;
 }) {
   const isLong = type === "long";
@@ -398,11 +398,11 @@ export default function Metodologia7({
   ticker,
   expiration,
   analyzeKey,
-  companyName = "",
 }: {
   ticker: string;
   expiration: string;
   analyzeKey: number;
+  // `companyName` sigue en el tipo porque el call-site lo pasa, pero no se usa aquí
   companyName?: string;
 }) {
   const [data, setData] = useState<Data7 | null>(null);
@@ -412,18 +412,25 @@ export default function Metodologia7({
   const [multiLoading, setMultiLoading] = useState(false);
 
   const fetchAnalysis = useCallback(async (t: string, exp: string) => {
-    setLoading(true);
-    setError("");
     try {
       const url = exp
         ? `/api/analysis7?ticker=${t}&upTo=${exp}`
         : `/api/analysis7?ticker=${t}`;
-      const res  = await fetch(url);
+      // Lanza la petición de inmediato para conservar el timing de red
+      const resPromise = fetch(url);
+      // Tras el primer await, estos setState ya no se ejecutan de forma
+      // síncrona dentro del cuerpo del efecto que invoca esta función
+      await Promise.resolve();
+      setLoading(true);
+      setError("");
+      setMultiData([]); // reset del análisis multi-fecha al lanzar uno nuevo
+      const res  = await resPromise;
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Error al obtener análisis M7");
       setData(json);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -447,7 +454,6 @@ export default function Metodologia7({
 
   useEffect(() => {
     if (analyzeKey > 0 && ticker) {
-      setMultiData([]);
       fetchAnalysis(ticker, expiration);
     }
   }, [analyzeKey]);

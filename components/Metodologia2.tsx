@@ -48,17 +48,24 @@ export default function Metodologia2({
   const [error, setError] = useState("");
 
   const fetchAnalysis = useCallback(async (t: string, exp: string) => {
-    setLoading(true);
-    setError("");
     try {
       const url = exp
         ? `/api/analysis2?ticker=${t}&expiration=${exp}`
         : `/api/analysis2?ticker=${t}`;
 
-      const [analysisRes, chartRes] = await Promise.all([
+      // Lanza ambas peticiones de inmediato para conservar el timing de red
+      const responses = Promise.all([
         fetch(url),
         fetch(`/api/chart?ticker=${t}&range=5mo`),
       ]);
+
+      // Tras el primer await, estos setState ya no se ejecutan de forma
+      // síncrona dentro del cuerpo del efecto que invoca esta función
+      await Promise.resolve();
+      setLoading(true);
+      setError("");
+
+      const [analysisRes, chartRes] = await responses;
 
       const analysisJson = await analysisRes.json();
       if (!analysisRes.ok) throw new Error(analysisJson.error ?? "Error");
@@ -66,8 +73,9 @@ export default function Metodologia2({
       const chartJson = await chartRes.json();
       setData(analysisJson);
       setCandles(chartJson.candles ?? []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }

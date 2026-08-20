@@ -317,16 +317,21 @@ export default function Metodologia6({
 
   async function fetchAll() {
     if (!ticker.trim()) return;
-    setLoading(true);
-    setError("");
     try {
       const url5 = expiration
         ? `/api/analysis5?ticker=${ticker}&upTo=${expiration}`
         : `/api/analysis5?ticker=${ticker}`;
-      const [res6, res5] = await Promise.all([
+      // Lanza ambas peticiones de inmediato para conservar el timing de red
+      const responses = Promise.all([
         fetch(`/api/analysis6?ticker=${encodeURIComponent(ticker)}`),
         fetch(url5),
       ]);
+      // Tras el primer await, estos setState ya no se ejecutan de forma
+      // síncrona dentro del cuerpo del efecto que invoca esta función
+      await Promise.resolve();
+      setLoading(true);
+      setError("");
+      const [res6, res5] = await responses;
       const json6 = await res6.json();
       if (!res6.ok) throw new Error(json6.error ?? "Error");
       setData(json6);
@@ -334,8 +339,9 @@ export default function Metodologia6({
         const json5 = await res5.json();
         setData5(json5);
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }

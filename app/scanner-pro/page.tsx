@@ -122,7 +122,7 @@ type SortKey = keyof ConvictionRow;
 
 function sortRows(rows: ConvictionRow[], key: SortKey, asc: boolean) {
   return [...rows].sort((a, b) => {
-    const av = a[key] as any, bv = b[key] as any;
+    const av = a[key], bv = b[key];
     if (typeof av === "number" && typeof bv === "number") return asc ? av - bv : bv - av;
     return asc ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
   });
@@ -173,8 +173,8 @@ export default function ScannerProPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Error del servidor");
       setRows(json.rows ?? []);
-    } catch (e: any) {
-      setError(e.message ?? "Error desconocido");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error desconocido");
     } finally {
       setLoading(false);
     }

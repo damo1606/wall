@@ -45,6 +45,24 @@ const cVol = (v: number | null) => v == null ? "text-gray-500" : v < 0.15 ? "tex
 
 type SortCol = "ticker" | "assetType" | "price" | "return1d" | "return5d" | "return20d" | "return60d" | "returnYtd" | "dropFrom52w" | "volAnnualized" | "dollarVolume"
 
+// Encabezado de columna ordenable — a nivel de módulo para no recrear el
+// componente en cada render de la página (react-hooks/static-components)
+function Th({ col, label, sortBy, sortDir, onSort }: {
+  col: SortCol
+  label: string
+  sortBy: SortCol
+  sortDir: "asc" | "desc"
+  onSort: (c: SortCol) => void
+}) {
+  const active = sortBy === col
+  return (
+    <th onClick={() => onSort(col)}
+      className={`pb-2 pr-4 text-right cursor-pointer select-none whitespace-nowrap transition-colors ${active ? "text-white" : "text-gray-500 hover:text-gray-300"}`}>
+      {label}{active ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
+    </th>
+  )
+}
+
 export default function EtfsPage() {
   const [rows, setRows]       = useState<Row[]>([])
   const [asOf, setAsOf]       = useState<string | null>(null)
@@ -76,16 +94,6 @@ export default function EtfsPage() {
     const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number)
     return sortDir === "desc" ? -cmp : cmp
   })
-
-  function Th({ col, label }: { col: SortCol; label: string }) {
-    const active = sortBy === col
-    return (
-      <th onClick={() => sort(col)}
-        className={`pb-2 pr-4 text-right cursor-pointer select-none whitespace-nowrap transition-colors ${active ? "text-white" : "text-gray-500 hover:text-gray-300"}`}>
-        {label}{active ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
-      </th>
-    )
-  }
 
   return (
     <ErrorBoundary fallback="Error al cargar ETFs">
@@ -137,15 +145,15 @@ export default function EtfsPage() {
                   <tr className="text-left text-xs border-b border-gray-800">
                     <th onClick={() => sort("ticker")} className="pb-2 pr-6 text-gray-500 cursor-pointer select-none hover:text-gray-300">Ticker</th>
                     <th onClick={() => sort("assetType")} className="pb-2 pr-4 text-gray-500 cursor-pointer select-none hover:text-gray-300">Tipo</th>
-                    <Th col="price"         label="Precio" />
-                    <Th col="return1d"      label="1d" />
-                    <Th col="return5d"      label="5d" />
-                    <Th col="return20d"     label="20d" />
-                    <Th col="return60d"     label="60d" />
-                    <Th col="returnYtd"     label="YTD" />
-                    <Th col="dropFrom52w"   label="vs 52w máx" />
-                    <Th col="volAnnualized" label="Vol anual" />
-                    <Th col="dollarVolume"  label="Liquidez $/d" />
+                    <Th col="price"         label="Precio"       sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="return1d"      label="1d"           sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="return5d"      label="5d"           sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="return20d"     label="20d"          sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="return60d"     label="60d"          sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="returnYtd"     label="YTD"          sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="dropFrom52w"   label="vs 52w máx"   sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="volAnnualized" label="Vol anual"    sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="dollarVolume"  label="Liquidez $/d" sortBy={sortBy} sortDir={sortDir} onSort={sort} />
                   </tr>
                 </thead>
                 <tbody>

@@ -103,7 +103,7 @@ export async function GET(request: NextRequest) {
     const spot = result.quote?.regularMarketPrice ?? 0;
 
     return NextResponse.json({ expirations, spot });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

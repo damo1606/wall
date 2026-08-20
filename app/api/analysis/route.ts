@@ -9,6 +9,13 @@ const HEADERS = {
   Referer: "https://finance.yahoo.com/",
 };
 
+// Contrato crudo de la cadena de opciones de Yahoo Finance (solo los campos que usamos).
+interface YahooOptionContract {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+}
+
 async function getCredentials(): Promise<{ crumb: string; cookie: string }> {
   // Step 1: hit Yahoo to get session cookie
   const res1 = await fetch("https://fc.yahoo.com", {
@@ -105,13 +112,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const rawCalls = (optData.calls ?? []).map((c: any) => ({
+    const rawCalls = (optData.calls ?? []).map((c: YahooOptionContract) => ({
       strike: c.strike ?? 0,
       impliedVolatility: c.impliedVolatility ?? 0,
       openInterest: c.openInterest ?? 0,
     }));
 
-    const rawPuts = (optData.puts ?? []).map((p: any) => ({
+    const rawPuts = (optData.puts ?? []).map((p: YahooOptionContract) => ({
       strike: p.strike ?? 0,
       impliedVolatility: p.impliedVolatility ?? 0,
       openInterest: p.openInterest ?? 0,
@@ -127,9 +134,9 @@ export async function GET(request: NextRequest) {
     );
 
     return NextResponse.json(result);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { error: e.message ?? "Unknown error" },
+      { error: e instanceof Error ? e.message : "Unknown error" },
       { status: 500 }
     );
   }

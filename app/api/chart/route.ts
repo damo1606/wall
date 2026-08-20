@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       .filter((c) => c.open && c.high && c.low && c.close);
 
     return NextResponse.json({ candles });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

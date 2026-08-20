@@ -48,6 +48,24 @@ const cDE   = (v: number | null) => v == null ? "text-gray-500" : v < 50 ? "text
 
 type SortCol = "ticker" | "sector" | "marketCap" | "pe" | "pb" | "evEbitda" | "roe" | "roic" | "fcfYield" | "debtToEquity" | "dividendYield" | "revenueTtm"
 
+// Encabezado de columna ordenable — a nivel de módulo para no recrear el
+// componente en cada render de la página (react-hooks/static-components)
+function Th({ col, label, sortBy, sortDir, onSort }: {
+  col: SortCol
+  label: string
+  sortBy: SortCol
+  sortDir: "asc" | "desc"
+  onSort: (c: SortCol) => void
+}) {
+  const active = sortBy === col
+  return (
+    <th onClick={() => onSort(col)}
+      className={`pb-2 pr-4 text-right cursor-pointer select-none whitespace-nowrap transition-colors ${active ? "text-white" : "text-gray-500 hover:text-gray-300"}`}>
+      {label}{active ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
+    </th>
+  )
+}
+
 export default function FundamentalesPage() {
   const [rows, setRows]       = useState<Row[]>([])
   const [asOf, setAsOf]       = useState<string | null>(null)
@@ -80,16 +98,6 @@ export default function FundamentalesPage() {
     const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number)
     return sortDir === "desc" ? -cmp : cmp
   })
-
-  function Th({ col, label }: { col: SortCol; label: string }) {
-    const active = sortBy === col
-    return (
-      <th onClick={() => sort(col)}
-        className={`pb-2 pr-4 text-right cursor-pointer select-none whitespace-nowrap transition-colors ${active ? "text-white" : "text-gray-500 hover:text-gray-300"}`}>
-        {label}{active ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
-      </th>
-    )
-  }
 
   return (
     <ErrorBoundary fallback="Error al cargar fundamentales">
@@ -140,16 +148,16 @@ export default function FundamentalesPage() {
                     <th onClick={() => sort("ticker")} className="pb-2 pr-6 text-gray-500 cursor-pointer select-none hover:text-gray-300">Empresa</th>
                     <th onClick={() => sort("sector")} className="pb-2 pr-4 text-gray-500 cursor-pointer select-none hover:text-gray-300">Sector</th>
                     <th className="pb-2 pr-4 text-right text-gray-500">Precio</th>
-                    <Th col="marketCap"     label="Mkt Cap" />
-                    <Th col="pe"            label="P/E" />
-                    <Th col="pb"            label="P/B" />
-                    <Th col="evEbitda"     label="EV/EBITDA" />
-                    <Th col="roe"          label="ROE" />
-                    <Th col="roic"         label="ROIC" />
-                    <Th col="fcfYield"     label="FCF Yield" />
-                    <Th col="debtToEquity" label="D/E" />
-                    <Th col="dividendYield" label="Div" />
-                    <Th col="revenueTtm"   label="Ingresos TTM" />
+                    <Th col="marketCap"     label="Mkt Cap"       sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="pe"            label="P/E"           sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="pb"            label="P/B"           sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="evEbitda"     label="EV/EBITDA"      sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="roe"          label="ROE"            sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="roic"         label="ROIC"           sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="fcfYield"     label="FCF Yield"      sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="debtToEquity" label="D/E"            sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="dividendYield" label="Div"           sortBy={sortBy} sortDir={sortDir} onSort={sort} />
+                    <Th col="revenueTtm"   label="Ingresos TTM"   sortBy={sortBy} sortDir={sortDir} onSort={sort} />
                   </tr>
                 </thead>
                 <tbody>

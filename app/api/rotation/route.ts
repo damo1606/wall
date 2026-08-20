@@ -23,6 +23,13 @@ const SECTOR_ETFS = [
   { ticker: "TLT",  label: "Bonos 20Y",          group: "alternative" },
 ] as const;
 
+// Campos que usamos de cada contrato de la cadena de opciones de Yahoo.
+type YahooRawOption = {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+};
+
 async function getCredentials(): Promise<{ crumb: string; cookie: string }> {
   const res1 = await fetch("https://fc.yahoo.com", { headers: HEADERS, redirect: "follow" });
   const setCookie = res1.headers.get("set-cookie") ?? "";
@@ -71,12 +78,12 @@ export async function GET() {
         );
         const primaryExp = availableExpirations[0] ?? "";
 
-        const calls = (optData.calls ?? []).map((c: any) => ({
+        const calls = (optData.calls ?? []).map((c: YahooRawOption) => ({
           strike: c.strike ?? 0,
           impliedVolatility: c.impliedVolatility ?? 0,
           openInterest: c.openInterest ?? 0,
         }));
-        const puts = (optData.puts ?? []).map((p: any) => ({
+        const puts = (optData.puts ?? []).map((p: YahooRawOption) => ({
           strike: p.strike ?? 0,
           impliedVolatility: p.impliedVolatility ?? 0,
           openInterest: p.openInterest ?? 0,
@@ -122,7 +129,7 @@ export async function GET() {
     etfs.sort((a, b) => b.institutionalPressure - a.institutionalPressure);
 
     return NextResponse.json({ etfs, timestamp: new Date().toISOString() });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

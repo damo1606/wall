@@ -62,13 +62,28 @@ async function fetchTickerOptions(symbol: string, cookie: string, crumb: string)
   return result;
 }
 
-function parseChain(optData: any): { calls: ExpData5["calls"]; puts: ExpData5["puts"] } {
-  const calls = (optData?.calls ?? []).map((c: any) => ({
+// Contrato crudo de la cadena de opciones de Yahoo Finance (solo los campos que usamos).
+interface YahooOptionContract {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+}
+
+// Bloque options[0] de la respuesta de Yahoo.
+interface YahooOptionsData {
+  calls?: YahooOptionContract[];
+  puts?: YahooOptionContract[];
+}
+
+function parseChain(
+  optData: YahooOptionsData | null | undefined
+): { calls: ExpData5["calls"]; puts: ExpData5["puts"] } {
+  const calls = (optData?.calls ?? []).map((c) => ({
     strike: c.strike ?? 0,
     impliedVolatility: c.impliedVolatility ?? 0,
     openInterest: c.openInterest ?? 0,
   }));
-  const puts = (optData?.puts ?? []).map((p: any) => ({
+  const puts = (optData?.puts ?? []).map((p) => ({
     strike: p.strike ?? 0,
     impliedVolatility: p.impliedVolatility ?? 0,
     openInterest: p.openInterest ?? 0,
@@ -134,13 +149,7 @@ export async function GET(request: NextRequest) {
 
     if (expDataList.length === 0) return NextResponse.json({ error: "No valid expiration data" }, { status: 400 });
 
-    // ── ATM IV ────────────────────────────────────────────────────────────────
     const { calls: primaryCalls, puts: primaryPuts } = parseChain(firstOptData);
-    const nearCall = [...primaryCalls].sort((a, b) => Math.abs(a.strike - spot) - Math.abs(b.strike - spot))[0]
-    const nearPut  = [...primaryPuts ].sort((a, b) => Math.abs(a.strike - spot) - Math.abs(b.strike - spot))[0]
-    const cIv = (nearCall?.impliedVolatility ?? 0) * 100
-    const pIv = (nearPut?.impliedVolatility  ?? 0) * 100
-    const atmIv = parseFloat(((cIv > 0 && pIv > 0) ? (cIv + pIv) / 2 : cIv || pIv).toFixed(1))
 
     // ── M1 ────────────────────────────────────────────────────────────────────
     const m1 = computeAnalysis(ticker, spot, primaryExpDate.date, availableExpirations, primaryCalls, primaryPuts);
@@ -180,15 +189,15 @@ export async function GET(request: NextRequest) {
 
     // ── M6 ────────────────────────────────────────────────────────────────────
     const vix    = vixData.current;
-    const vix3m  = (vix3mData as any).current > 0 ? (vix3mData as any).current : vix * 1.05;
+    const vix3m  = vix3mData.current > 0 ? vix3mData.current : vix * 1.05;
     const vixHistory = vixData.history;
 
-    const hygHistory = (hygData as any).history as number[];
-    const hygCurrent = (hygData as any).current as number;
+    const hygHistory = hygData.history;
+    const hygCurrent = hygData.current;
     const hygChange5d = hygHistory[0] > 0 ? ((hygCurrent - hygHistory[0]) / hygHistory[0]) * 100 : 0;
 
-    const spyHistArr = (spyHistory as any).history as number[];
-    const spyCurrent = (spyHistory as any).current as number;
+    const spyHistArr = spyHistory.history;
+    const spyCurrent = spyHistory.current;
     const last50 = spyHistArr.slice(-50);
     const sma50  = last50.length > 0 ? last50.reduce((a: number, b: number) => a + b, 0) / last50.length : spyCurrent;
     const spyVsSma50 = sma50 > 0 ? ((spyCurrent - sma50) / sma50) * 100 : 0;
@@ -197,8 +206,8 @@ export async function GET(request: NextRequest) {
     const spyOptData = spyResult.options?.[0];
     const spyExpTs: number = spyResult.expirationDates?.[0] ?? 0;
     const spyT = Math.max((new Date(spyExpTs * 1000).getTime() - today.getTime()) / (365 * 24 * 60 * 60 * 1000), 0.001);
-    const spyCalls = spyOptData ? (spyOptData.calls ?? []).map((c: any) => ({ strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0, openInterest: c.openInterest ?? 0 })) : [];
-    const spyPuts  = spyOptData ? (spyOptData.puts  ?? []).map((p: any) => ({ strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0, openInterest: p.openInterest ?? 0 })) : [];
+    const spyCalls = spyOptData ? (spyOptData.calls ?? []).map((c: YahooOptionContract) => ({ strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0, openInterest: c.openInterest ?? 0 })) : [];
+    const spyPuts  = spyOptData ? (spyOptData.puts  ?? []).map((p: YahooOptionContract) => ({ strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0, openInterest: p.openInterest ?? 0 })) : [];
     const { gexTotal: spyGexTotal, pcr: spyPcr } = computeSpyMetrics(spyCalls, spyPuts, spySpot, spyT);
     const m6 = computeRegime(vix, vix3m, vixHistory, spyGexTotal, spyPcr, spySpot, hygChange5d, spyVsSma50);
 
@@ -254,7 +263,10 @@ export async function GET(request: NextRequest) {
       flowScore,
       liquidityScore,
     });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }

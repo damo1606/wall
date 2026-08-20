@@ -42,13 +42,28 @@ async function fetchOptions(
   return result;
 }
 
-function parseChain(optData: any): { calls: ExpData5["calls"]; puts: ExpData5["puts"] } {
-  const calls = (optData?.calls ?? []).map((c: any) => ({
+// Contrato crudo de la cadena de opciones de Yahoo Finance (solo los campos que usamos).
+interface YahooOptionContract {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+}
+
+// Bloque options[0] de la respuesta de Yahoo.
+interface YahooOptionsData {
+  calls?: YahooOptionContract[];
+  puts?: YahooOptionContract[];
+}
+
+function parseChain(
+  optData: YahooOptionsData | null | undefined
+): { calls: ExpData5["calls"]; puts: ExpData5["puts"] } {
+  const calls = (optData?.calls ?? []).map((c) => ({
     strike: c.strike ?? 0,
     impliedVolatility: c.impliedVolatility ?? 0,
     openInterest: c.openInterest ?? 0,
   }));
-  const puts = (optData?.puts ?? []).map((p: any) => ({
+  const puts = (optData?.puts ?? []).map((p) => ({
     strike: p.strike ?? 0,
     impliedVolatility: p.impliedVolatility ?? 0,
     openInterest: p.openInterest ?? 0,
@@ -176,7 +191,10 @@ export async function GET(request: NextRequest) {
     );
 
     return NextResponse.json({ ...result, availableExpirations, allExpirations: availableExpirations });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }

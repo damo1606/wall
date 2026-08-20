@@ -35,6 +35,18 @@ export interface Heatmap2DData {
   resistance: number;
 }
 
+// Contrato crudo de la cadena de Yahoo — solo los campos que consumimos.
+interface YahooRawOption {
+  strike: number;
+  openInterest?: number;
+  impliedVolatility?: number;
+}
+
+interface YahooOptionsData {
+  calls?: YahooRawOption[];
+  puts?: YahooRawOption[];
+}
+
 async function getCredentials(): Promise<{ crumb: string; cookie: string }> {
   const res1 = await fetch("https://fc.yahoo.com", { headers: HEADERS, redirect: "follow" });
   const setCookie = res1.headers.get("set-cookie") ?? "";
@@ -62,7 +74,7 @@ async function fetchOptions(ticker: string, cookie: string, crumb: string, dateT
 
 function computeCells(
   expiration: string,
-  optData: any,
+  optData: YahooOptionsData,
   spot: number,
   lower: number,
   upper: number
@@ -71,12 +83,12 @@ function computeCells(
   const expDate = new Date(expiration + "T00:00:00");
   const T = Math.max((expDate.getTime() - today.getTime()) / (365 * 24 * 60 * 60 * 1000), 0.001);
 
-  const calls: any[] = optData?.calls ?? [];
-  const puts: any[]  = optData?.puts  ?? [];
+  const calls = optData?.calls ?? [];
+  const puts  = optData?.puts  ?? [];
 
   const strikeSet = new Set<number>([
-    ...calls.map((c: any) => c.strike),
-    ...puts.map((p: any)  => p.strike),
+    ...calls.map((c) => c.strike),
+    ...puts.map((p)  => p.strike),
   ]);
 
   const cells: Heatmap2DCell[] = [];
@@ -86,8 +98,8 @@ function computeCells(
   let best25Put:  { iv: number; dist: number } | null = null;
 
   for (const strike of Array.from(strikeSet)) {
-    const call = calls.find((c: any) => c.strike === strike);
-    const put  = puts.find((p: any)  => p.strike === strike);
+    const call = calls.find((c) => c.strike === strike);
+    const put  = puts.find((p)  => p.strike === strike);
 
     const callOI = call?.openInterest ?? 0;
     const putOI  = put?.openInterest  ?? 0;
@@ -225,7 +237,7 @@ export async function GET(request: NextRequest) {
     };
 
     return NextResponse.json(data);
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

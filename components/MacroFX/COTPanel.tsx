@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { CURRENCIES } from '@/lib/forex'
-import type { Currency, COTData } from '@/types/forex'
+import type { COTData } from '@/types/forex'
 
 interface Props {
   cotData: COTData
@@ -10,15 +10,15 @@ interface Props {
 }
 
 export function COTPanel({ cotData, onUpdate }: Props) {
-  const [loading, setLoading] = useState(false)
+  // Arranca en true: la carga inicial se dispara al montar (evita setState síncrono en el efecto)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const onUpdateRef = useRef(onUpdate)
   useEffect(() => { onUpdateRef.current = onUpdate }, [onUpdate])
 
-  const fetchFromCFTC = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  // Fetch puro: solo hace setState tras el await, seguro para llamarlo desde el efecto de montaje
+  const doFetch = useCallback(async () => {
     try {
       const res = await fetch('/api/cot')
       if (!res.ok) throw new Error(`Error ${res.status}`)
@@ -31,7 +31,15 @@ export function COTPanel({ cotData, onUpdate }: Props) {
     }
   }, [])
 
-  useEffect(() => { fetchFromCFTC() }, [fetchFromCFTC])
+  // Botón "Actualizar": muestra el estado de carga y limpia el error antes de refetchear
+  const fetchFromCFTC = useCallback(() => {
+    setLoading(true)
+    setError(null)
+    void doFetch()
+  }, [doFetch])
+
+  // Microtarea: los setState de doFetch no corren síncronos dentro del efecto
+  useEffect(() => { void Promise.resolve().then(doFetch) }, [doFetch])
 
   function scoreLabel(v: number | undefined): string {
     if (v === undefined) return '—'

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { supabaseServer, type TypedClient } from "@/lib/supabase"
+import { supabaseServer } from "@/lib/supabase"
 import { getCrumb } from "@/lib/yahoo"
 
 export const dynamic = "force-dynamic"

@@ -132,12 +132,11 @@ function ChartPanel({ symbol, tf, levels }: { symbol: "GLD" | "QQQ"; tf: Tf; lev
         priceScaleId: "vol",
       })
       chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       volSeries.setData(candles.map(c => ({
         time:  c.time,
         value: c.volume,
         color: c.close >= c.open ? "#22c55e30" : "#ef444430",
-      })) as any)
+      })))
     } catch { /* volume histogram optional */ }
 
     // S/R price lines

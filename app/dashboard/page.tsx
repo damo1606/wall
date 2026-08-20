@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useSyncExternalStore } from "react"
 import Link from "next/link"
 import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
@@ -67,9 +67,37 @@ const SIGNAL_CFG: Record<string, { cls: string; icon: string }> = {
   "Venta Fuerte":  { cls: "bg-red-700 text-white",     icon: "▼▼" },
 }
 
+// ─── Store externo de tickers del scanner (localStorage) ────────────────────
+// useSyncExternalStore reemplaza el patrón "leer localStorage al montar":
+// el servidor renderiza el default (getServerSnapshot) y el cliente se
+// sincroniza tras hidratar, sin setState síncrono en un efecto ni mismatch.
+
+const scanTickersListeners = new Set<() => void>()
+
+function subscribeScanTickers(cb: () => void) {
+  scanTickersListeners.add(cb)
+  return () => { scanTickersListeners.delete(cb) }
+}
+
+function readScanTickers(): string {
+  try {
+    return localStorage.getItem(LS_SCAN_KEY) ?? DEFAULT_SCAN_TICKERS
+  } catch {
+    return DEFAULT_SCAN_TICKERS
+  }
+}
+
+function readScanTickersServer(): string {
+  return DEFAULT_SCAN_TICKERS
+}
+
+function writeScanTickers(v: string) {
+  try { localStorage.setItem(LS_SCAN_KEY, v) } catch {}
+  scanTickersListeners.forEach(cb => cb())
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function pct(v: number) { return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%` }
 function usd(v: number) { return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
 
 function GradeBadge({ grade }: { grade: string }) {
@@ -92,16 +120,16 @@ export default function DashboardPage() {
   const [anomalies,    setAnomalies]    = useState<AnomalyRow[]>([])
   const [loading,      setLoading]      = useState(true)
   const [updatedAt,    setUpdatedAt]    = useState("")
-  const [scanTickers,  setScanTickers]  = useState(DEFAULT_SCAN_TICKERS)
+  const scanTickers = useSyncExternalStore(subscribeScanTickers, readScanTickers, readScanTickersServer)
   const [editingTickers, setEditingTickers] = useState(false)
   const [editValue,    setEditValue]    = useState("")
   const [oppLevels,    setOppLevels]    = useState<Record<string, GexLevels>>({})
   const [winRates,     setWinRates]     = useState<Record<string, { wr: number; n: number }>>({})
   const [phaseWinRate, setPhaseWinRate] = useState<{ wr: number; n: number } | null>(null)
 
+  // Sin setState síncrono: el efecto de montaje la llama con `loading` ya en
+  // true (estado inicial) y el botón de refresco enciende el loader él mismo.
   async function loadAll() {
-    setLoading(true)
-
     // Todos los fetches en paralelo
     const [macroRes, gexRes, scanRes] = await Promise.allSettled([
       fetch("/api/macro").then(r => r.ok ? r.json() : null),
@@ -181,12 +209,8 @@ export default function DashboardPage() {
     setLoading(false)
   }
 
-  useEffect(() => {
-    const saved = typeof window !== "undefined" ? (localStorage.getItem(LS_SCAN_KEY) ?? DEFAULT_SCAN_TICKERS) : DEFAULT_SCAN_TICKERS
-    setScanTickers(saved)
-  }, [])
-
-  useEffect(() => { loadAll() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Microtarea: los setState de loadAll no corren síncronos dentro del efecto
+  useEffect(() => { Promise.resolve().then(loadAll) }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const phase = macro?.detection?.phase
   const phaseCfg = phase ? PHASE_CFG[phase] : null
@@ -210,10 +234,7 @@ export default function DashboardPage() {
             {!editingTickers && (
               <div className="flex items-center gap-1">
                 {Object.entries(PRESET_UNIVERSES).map(([name, tickers]) => (
-                  <button key={name} onClick={() => {
-                    setScanTickers(tickers)
-                    localStorage.setItem(LS_SCAN_KEY, tickers)
-                  }}
+                  <button key={name} onClick={() => writeScanTickers(tickers)}
                     className={`text-[10px] px-2 py-1 border transition-colors ${scanTickers === tickers ? "border-blue-600 text-blue-300 bg-blue-900/30" : "border-gray-700 text-gray-500 hover:text-gray-300"}`}>
                     {name}
                   </button>
@@ -228,10 +249,7 @@ export default function DashboardPage() {
                   onKeyDown={e => {
                     if (e.key === "Enter") {
                       const cleaned = editValue.split(",").map(t => t.trim()).filter(Boolean).join(",")
-                      if (cleaned) {
-                        setScanTickers(cleaned)
-                        localStorage.setItem(LS_SCAN_KEY, cleaned)
-                      }
+                      if (cleaned) writeScanTickers(cleaned)
                       setEditingTickers(false)
                     }
                     if (e.key === "Escape") setEditingTickers(false)
@@ -243,7 +261,7 @@ export default function DashboardPage() {
                 <button
                   onClick={() => {
                     const cleaned = editValue.split(",").map(t => t.trim()).filter(Boolean).join(",")
-                    if (cleaned) { setScanTickers(cleaned); localStorage.setItem(LS_SCAN_KEY, cleaned) }
+                    if (cleaned) writeScanTickers(cleaned)
                     setEditingTickers(false)
                   }}
                   className="text-xs px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white transition-colors">
@@ -259,7 +277,7 @@ export default function DashboardPage() {
                 ✏ Tickers
               </button>
             )}
-            <button onClick={loadAll} disabled={loading}
+            <button onClick={() => { setLoading(true); loadAll() }} disabled={loading}
               className="text-xs px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:text-white disabled:opacity-40 transition-colors">
               {loading ? "Actualizando..." : "↻ Actualizar"}
             </button>

@@ -1,6 +1,6 @@
 import type { AnalysisResult } from "@/types";
 import type { Analysis2Result, Analysis3Result } from "@/types";
-import type { Analysis5Result, SRLevel } from "@/lib/gex5";
+import type { Analysis5Result } from "@/lib/gex5";
 import type { Analysis6Result } from "@/lib/gex6";
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -422,7 +422,7 @@ function buildTimingMatrix(
 
   // ── TRIMESTRAL ────────────────────────────────────────────────────────────
   const trimOkRegimes = ["COMPRESIÓN", "TRANSICIÓN"];
-  let trimestralSignal: TimingBlock["signal"] =
+  const trimestralSignal: TimingBlock["signal"] =
     trimOkRegimes.includes(m6.regime) ? finalVerdict : "NO OPERAR";
 
   const trimestralEntry = spot;

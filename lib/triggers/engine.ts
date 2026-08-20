@@ -1,7 +1,7 @@
 import type { TypedClient } from "@/lib/supabase"
-import { CONDITIONS, evaluateCondition, type SnapshotPayload } from "./conditions"
+import { evaluateCondition, type SnapshotPayload } from "./conditions"
 import { firstFiringExit, type ExitContext, type ExitReason } from "./exits"
-import { loadRotationMap, rotationFor, type MacroPhase, type RotationMap, type RotationStatus } from "./rotation"
+import { loadRotationMap, rotationFor, type MacroPhase, type RotationStatus } from "./rotation"
 import { hasEventInWindow, isNearEarnings, type MacroEventInfo } from "./events"
 import { checkEligibility } from "./eligibility"
 

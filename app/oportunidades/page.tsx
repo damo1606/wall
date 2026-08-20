@@ -109,9 +109,18 @@ export default function OportunidadesPage() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState("")
 
-  const load = useCallback(async (u: string) => {
+  // Reinicia carga/error durante el render al cambiar el universo
+  // (patrón "prev state" — evita setState síncrono dentro del efecto)
+  const [prevUniverse, setPrevUniverse] = useState(universe)
+  if (prevUniverse !== universe) {
+    setPrevUniverse(universe)
     setLoading(true)
     setError("")
+  }
+
+  // Sin setState síncrono: `loading` ya nace en true para la carga inicial y
+  // el bloque de arriba lo reactiva cuando cambia el universo.
+  const load = useCallback(async (u: string) => {
     try {
       const res = await fetch(`/api/oportunidades?universe=${u}`, { cache: "no-store" })
       const json = await res.json()
@@ -124,7 +133,8 @@ export default function OportunidadesPage() {
     }
   }, [])
 
-  useEffect(() => { load(universe) }, [universe, load])
+  // Microtarea: los setState de load no corren síncronos dentro del efecto
+  useEffect(() => { Promise.resolve().then(() => load(universe)) }, [universe, load])
 
   return (
     <div className="flex flex-col min-h-screen">

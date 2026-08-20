@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useEffect } from "react";
 import type { Analysis5Result, SRLevel, SignalComponent, ScoredStrike } from "@/lib/gex5";
-import type { Analysis6Result } from "@/lib/gex6";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ReferenceLine, Cell, ResponsiveContainer,
@@ -248,16 +247,22 @@ export default function Metodologia5({
   const [error, setError] = useState("");
 
   const fetchAnalysis = useCallback(async (t: string, exp: string) => {
-    setLoading(true);
-    setError("");
     try {
       const url = exp ? `/api/analysis5?ticker=${t}&upTo=${exp}` : `/api/analysis5?ticker=${t}`;
-      const res = await fetch(url);
+      // Lanza la petición de inmediato para conservar el timing de red
+      const resPromise = fetch(url);
+      // Tras el primer await, estos setState ya no se ejecutan de forma
+      // síncrona dentro del cuerpo del efecto que invoca esta función
+      await Promise.resolve();
+      setLoading(true);
+      setError("");
+      const res = await resPromise;
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Error");
       setData(json);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -432,8 +437,10 @@ export default function Metodologia5({
                 />
                 <Tooltip
                   contentStyle={{ background: "#f9f9f9", border: "1px solid #e0e0e0", fontSize: 12 }}
-                  formatter={(v: number, _name: string, props: any) => {
-                    const entry: ScoredStrike = props.payload;
+                  formatter={(v: number, _name: string, props: { payload?: ScoredStrike }) => {
+                    // `payload` es opcional en el tipado de recharts: narrowing explícito
+                    const entry = props.payload;
+                    if (!entry) return [`${Math.round(v * 100)}%`, "Neutral"];
                     const tipo = entry.isSupport ? "Soporte" : entry.isResistance ? "Resistencia" : "Neutral";
                     return [`${Math.round(v * 100)}% · ${fmtNotional(entry.notionalOI)}`, tipo];
                   }}

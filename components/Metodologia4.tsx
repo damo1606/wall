@@ -141,18 +141,24 @@ export default function Metodologia4({
   const [error, setError] = useState("");
 
   const fetchHeatmap = useCallback(async (t: string, exp: string) => {
-    setLoading(true);
-    setError("");
     try {
       const url = exp
         ? `/api/heatmap2d?ticker=${t}&upTo=${exp}`
         : `/api/heatmap2d?ticker=${t}`;
-      const res = await fetch(url);
+      // Lanza la petición de inmediato para conservar el timing de red
+      const resPromise = fetch(url);
+      // Tras el primer await, estos setState ya no se ejecutan de forma
+      // síncrona dentro del cuerpo del efecto que invoca esta función
+      await Promise.resolve();
+      setLoading(true);
+      setError("");
+      const res = await resPromise;
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Error");
       setData(json);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }

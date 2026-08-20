@@ -73,13 +73,24 @@ export async function listPortfolios(): Promise<PortfolioMeta[]> {
   } catch { return [] }
 }
 
+/** Fila cruda de `/api/portfolio` (columnas snake_case de Supabase). */
+type PortfolioRow = {
+  id: string
+  symbol: string
+  company: string | null
+  qty: number | string
+  buy_price: number | string
+  buy_date: string | null
+  notes: string | null
+}
+
 export async function getPortfolio(portfolioId?: string): Promise<PortfolioEntry[]> {
   try {
     const qs = portfolioId ? `?portfolio_id=${encodeURIComponent(portfolioId)}` : ""
     const res = await fetch(`/api/portfolio${qs}`)
     if (!res.ok) return []
     const rows = await res.json()
-    return rows.map((r: any): PortfolioEntry => ({
+    return rows.map((r: PortfolioRow): PortfolioEntry => ({
       id:       r.id,
       symbol:   r.symbol,
       company:  r.company ?? "",
@@ -179,12 +190,21 @@ export async function sellPosition(
 
 // ─── Lista de Seguimiento ─────────────────────────────────────────────────────
 
+/** Fila cruda de `/api/watchlist` (columnas snake_case de Supabase). */
+type WatchRow = {
+  symbol: string
+  company: string | null
+  added_at: string | null
+  target_price: number | string | null
+  notes: string | null
+}
+
 export async function getWatchEntries(): Promise<WatchEntry[]> {
   try {
     const res = await fetch("/api/watchlist")
     if (!res.ok) return []
     const rows = await res.json()
-    return rows.map((r: any): WatchEntry => ({
+    return rows.map((r: WatchRow): WatchEntry => ({
       symbol:      r.symbol,
       company:     r.company ?? "",
       addedAt:     r.added_at?.slice(0, 10) ?? "",
@@ -215,12 +235,25 @@ export async function isWatching(symbol: string): Promise<boolean> {
 
 // ─── Alertas ──────────────────────────────────────────────────────────────────
 
+/** Fila cruda de `/api/alerts` (columnas snake_case de Supabase). */
+type AlertRow = {
+  id: string
+  symbol: string
+  type: string
+  threshold: number | string | null
+  label: string | null
+  active: boolean | null
+  triggered: boolean | null
+  triggered_at: string | null
+  created_at: string | null
+}
+
 export async function getAlerts(): Promise<Alert[]> {
   try {
     const res = await fetch("/api/alerts")
     if (!res.ok) return []
     const rows = await res.json()
-    return rows.map((r: any): Alert => ({
+    return rows.map((r: AlertRow): Alert => ({
       id:          r.id,
       symbol:      r.symbol,
       type:        r.type as AlertType,

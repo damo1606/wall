@@ -14,6 +14,24 @@ export interface SearchResult {
   type: string;
 }
 
+// Shape mínimo de los quotes de v1/finance/search de Yahoo.
+type YahooSearchQuote = {
+  symbol?: string;
+  shortname?: string;
+  longname?: string;
+  exchDisp?: string;
+  exchange?: string;
+  quoteType?: string;
+};
+
+// Shape mínimo de los items de v6/finance/autocomplete de Yahoo.
+type YahooAutocompleteItem = {
+  symbol?: string;
+  name?: string;
+  exch?: string;
+  typeDisp?: string;
+};
+
 export async function GET(request: NextRequest) {
   const q = request.nextUrl.searchParams.get("q")?.trim();
   if (!q || q.length < 1) return NextResponse.json({ results: [] });
@@ -37,8 +55,8 @@ export async function GET(request: NextRequest) {
       const json = await res1.json();
       const quotes = json?.quotes ?? [];
       const results: SearchResult[] = quotes
-        .filter((q: any) => ["EQUITY", "ETF", "INDEX"].includes(q.quoteType))
-        .map((q: any) => ({
+        .filter((q: YahooSearchQuote) => ["EQUITY", "ETF", "INDEX"].includes(q.quoteType ?? ""))
+        .map((q: YahooSearchQuote) => ({
           symbol:   q.symbol ?? "",
           name:     q.shortname ?? q.longname ?? q.symbol ?? "",
           exchange: q.exchDisp ?? q.exchange ?? "",
@@ -56,9 +74,9 @@ export async function GET(request: NextRequest) {
     const json2 = await res2.json();
     const items = json2?.ResultSet?.Result ?? [];
     const results2: SearchResult[] = items
-      .filter((r: any) => r.symbol && !r.symbol.includes("="))
+      .filter((r: YahooAutocompleteItem) => r.symbol && !r.symbol.includes("="))
       .slice(0, 8)
-      .map((r: any) => ({
+      .map((r: YahooAutocompleteItem) => ({
         symbol:   r.symbol ?? "",
         name:     r.name ?? r.symbol ?? "",
         exchange: r.exch ?? "",
