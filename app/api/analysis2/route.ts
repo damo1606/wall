@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeAnalysis2 } from "@/lib/gex2";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent":
@@ -53,6 +54,7 @@ async function fetchOptions(ticker: string, cookie: string, crumb: string, dateT
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   const expiration = request.nextUrl.searchParams.get("expiration") ?? undefined;
 

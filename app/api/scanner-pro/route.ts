@@ -24,6 +24,8 @@ import { computeAnalysis7 } from "@/lib/gex7";
 import { computeAnalysis8, type ExpData8 } from "@/lib/gex8";
 import type { ExpData } from "@/lib/gex3";
 import type { Analysis6Result } from "@/lib/gex6";
+import { requireAuth } from "@/lib/api-auth"
+import { strictIntParam } from "@/lib/query-params"
 
 // ── Yahoo Finance helpers ─────────────────────────────────────────────────────
 
@@ -467,10 +469,19 @@ async function pool<T, R>(items: T[], concurrency: number, fn: (item: T) => Prom
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const { searchParams } = request.nextUrl;
   const universe    = searchParams.get("universe") ?? "sp500";
-  const limit       = Math.min(parseInt(searchParams.get("limit") ?? "20"), 100);
-  const minBuyScore = parseInt(searchParams.get("minBuyScore") ?? "50");
+  // Un parámetro inválido devolvía 200 con cero filas, indistinguible de "hoy no
+  // hay oportunidades". Ahora se responde 400 en vez de callar.
+  const limit       = strictIntParam(searchParams.get("limit"),       { def: 20, min: 1, max: 100 });
+  const minBuyScore = strictIntParam(searchParams.get("minBuyScore"), { def: 50, min: 0, max: 100 });
+  if (limit === null || minBuyScore === null) {
+    return NextResponse.json(
+      { error: "Parámetros inválidos: 'limit' y 'minBuyScore' deben ser enteros" },
+      { status: 400 }
+    );
+  }
 
   // 1. Fetch fundamental screener (directo, sin HTTP interno)
   const symbols = (

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { fetchPriceHistory } from "@/lib/yahoo"
 import { logReturns, markowitz, hrp, portfolioMetrics, correlationMatrix } from "@/lib/optimizer"
+import { requireAuth } from "@/lib/api-auth"
 
 export const dynamic = "force-dynamic"
 
@@ -18,6 +19,7 @@ function rangeForDays(days: number): string {
  * los pesos óptimos por Markowitz (máx. Sharpe + mín. volatilidad) y HRP.
  */
 export async function POST(req: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   try {
     const body = await req.json()
     const rawSymbols: unknown = body.symbols

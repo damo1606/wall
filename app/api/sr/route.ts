@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCrumb } from "@/lib/yahoo"
+import { requireAuth } from "@/lib/api-auth"
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -149,6 +150,7 @@ async function buildLevels(symbol: string, crumb: string, cookie: string) {
 }
 
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   const auth = await getCrumb()
   if (!auth) return NextResponse.json({ error: "Yahoo Finance no disponible" }, { status: 503 })
 

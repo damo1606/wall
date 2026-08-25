@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
+import { internalAuthHeaders } from "@/lib/api-auth"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -78,7 +79,12 @@ export async function GET(req: NextRequest) {
   let rows: ScannerRow[] = []
   let m6Regime = "—", m6Vix: number | null = null
   try {
-    const r = await fetch(`${base}/api/scanner-pro?universe=sp500&limit=100&minBuyScore=0`, { cache: "no-store" })
+    // scanner-pro exige auth. Este endpoint corre como cron, sin cookie de
+    // sesión, así que internalAuthHeaders cae al Bearer CRON_SECRET.
+    const r = await fetch(`${base}/api/scanner-pro?universe=sp500&limit=100&minBuyScore=0`, {
+      cache: "no-store",
+      headers: await internalAuthHeaders(),
+    })
     const j = await r.json()
     rows = (j.rows ?? []) as ScannerRow[]
     m6Regime = j.m6Regime ?? "—"

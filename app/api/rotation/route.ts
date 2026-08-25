@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { computeAnalysis } from "@/lib/gex";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -60,6 +61,7 @@ function toVerdict(pressure: number): "ALCISTA" | "BAJISTA" | "NEUTRAL" {
 }
 
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   try {
     const { crumb, cookie } = await getCredentials();
 

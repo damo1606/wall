@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeSpyMetrics, computeRegime, computeLeadIndicator } from "@/lib/gex6";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -58,6 +59,7 @@ async function fetchTickerOptions(symbol: string, cookie: string, crumb: string)
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   try {
     const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase() ?? "";
     const leadSymbols = Array.from(new Set(["TSLA", "AMD", ticker].filter((s) => s && s !== "SPY")));

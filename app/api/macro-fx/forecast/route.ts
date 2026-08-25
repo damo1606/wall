@@ -4,6 +4,7 @@ import { forecast } from "@/lib/forecast"
 import { analyzeMarkov } from "@/lib/markov"
 import { PAIRS } from "@/lib/forex"
 import type { PairForecast, PairMarkov } from "@/types/forex"
+import { requireAuth } from "@/lib/api-auth"
 
 // 26 ajustes GARCH ≈ 2-4 s CPU; el caché diario lo amortiza.
 export const revalidate = 86400
@@ -40,6 +41,7 @@ async function analyzePair(pair: string): Promise<PairStats | null> {
  * Devuelve { [pair]: PairStats | null }.
  */
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   const out: Record<string, PairStats | null> = {}
   for (let i = 0; i < PAIRS.length; i += BATCH) {
     const slice = PAIRS.slice(i, i + BATCH)

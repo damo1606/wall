@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeAnalysis3, type ExpData } from "@/lib/gex3";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent":
@@ -80,6 +81,7 @@ function parseChain(
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   const expiration = request.nextUrl.searchParams.get("expiration") ?? undefined;
   if (!ticker) {

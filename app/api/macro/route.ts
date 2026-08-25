@@ -1,5 +1,6 @@
 import { fetchMacroData, detectPhase, computeMacroScore, computeExpectationShift } from "@/lib/macro"
 import { getCrumb } from "@/lib/yahoo"
+import { requireAuth } from "@/lib/api-auth"
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 const YF_HEADERS = {
@@ -25,6 +26,7 @@ async function fetchYahooLast(symbol: string, cookie: string, crumb: string): Pr
 }
 
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   const [macroData, auth] = await Promise.all([
     fetchMacroData(),
     getCrumb(),

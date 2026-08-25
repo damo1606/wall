@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCrumb } from "@/lib/yahoo"
 import { readSnapshotHistory, recordDailySnapshot, SNAPSHOT_IV } from "@/lib/snapshots"
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -40,6 +41,7 @@ function ivPercentile(current: number, history: number[]): number | null {
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase()
   if (!ticker) return NextResponse.json({ error: "ticker required" }, { status: 400 })
 

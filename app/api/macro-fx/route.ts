@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server'
 import { computeScores, emptyInputs } from '@/lib/forex'
 import type { MacroInput, COTData } from '@/types/forex'
+import { requireAuth } from "@/lib/api-auth"
 
 // GET: devuelve estructura vacía (el estado real vive en localStorage del cliente)
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   return NextResponse.json({ inputs: emptyInputs(), cotData: {} })
 }
 
 // POST: recibe inputs + cotData, devuelve scores calculados
 export async function POST(req: Request) {
+  const denied = await requireAuth(); if (denied) return denied;
   try {
     const body = await req.json() as { inputs: MacroInput; cotData: COTData }
     const { inputs, cotData } = body

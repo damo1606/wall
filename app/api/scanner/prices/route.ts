@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -8,6 +9,7 @@ const HEADERS = {
 };
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const tickers = (searchParams.get("tickers") ?? "SPY").split(",").map((t) => t.trim().toUpperCase()).slice(0, 20);

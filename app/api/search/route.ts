@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -33,8 +34,15 @@ type YahooAutocompleteItem = {
 };
 
 export async function GET(request: NextRequest) {
-  const q = request.nextUrl.searchParams.get("q")?.trim();
-  if (!q || q.length < 1) return NextResponse.json({ results: [] });
+  const denied = await requireAuth(); if (denied) return denied;
+  // Sin `q` es una petición mal formada, no una búsqueda sin resultados: un 200
+  // con lista vacía hace que el cliente no distinga los dos casos.
+  const raw = request.nextUrl.searchParams.get("q");
+  if (raw == null) {
+    return NextResponse.json({ error: "Falta el parámetro 'q'" }, { status: 400 });
+  }
+  const q = raw.trim();
+  if (q.length < 1) return NextResponse.json({ results: [] });
 
   try {
     // Get crumb + cookie for authenticated requests

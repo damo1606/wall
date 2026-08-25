@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { gammaBS, deltaBS } from "@/lib/blackscholes";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent":
@@ -142,6 +143,7 @@ function computeCells(
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker     = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   const upTo       = request.nextUrl.searchParams.get("upTo") ?? "";   // optional end date
   if (!ticker) return NextResponse.json({ error: "ticker is required" }, { status: 400 });

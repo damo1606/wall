@@ -3,6 +3,7 @@ import { computeAnalysis } from "@/lib/gex";
 import { computeAnalysis2 } from "@/lib/gex2";
 import { computeAnalysis3 } from "@/lib/gex3";
 import { computeAnalysis5, compute25dSkew, type ExpData5 } from "@/lib/gex5";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent":
@@ -72,6 +73,7 @@ function parseChain(
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   const upTo   = request.nextUrl.searchParams.get("upTo") ?? "";
   if (!ticker) return NextResponse.json({ error: "ticker is required" }, { status: 400 });

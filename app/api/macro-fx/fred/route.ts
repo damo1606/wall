@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { Currency, MacroIndicator } from '@/types/forex'
+import { requireAuth } from "@/lib/api-auth"
 
 type SeriesCfg = { id: string; units: 'lin' | 'pc1' }
 type FredActuals = Partial<Record<Currency, Partial<Record<MacroIndicator, string>>>>
@@ -116,6 +117,7 @@ async function fetchLatest(cfg: SeriesCfg): Promise<string | null> {
 }
 
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   const tasks: Array<{ currency: Currency; indicator: MacroIndicator; cfg: SeriesCfg }> = []
 
   for (const [currency, indicators] of Object.entries(FRED_MAP)) {

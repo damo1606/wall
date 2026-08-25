@@ -7,6 +7,7 @@ import { computeSpyMetrics, computeRegime }                from "@/lib/gex6";
 import { computeAnalysis7 }                                from "@/lib/gex7";
 import { computeFlowScore, computeLiquidityScore }        from "@/lib/flows";
 import { readSnapshotHistory, recordDailySnapshot, SNAPSHOT_SR } from "@/lib/snapshots";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -92,6 +93,7 @@ function parseChain(
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   const upTo   = request.nextUrl.searchParams.get("upTo") ?? "";
   if (!ticker) return NextResponse.json({ error: "ticker is required" }, { status: 400 });
