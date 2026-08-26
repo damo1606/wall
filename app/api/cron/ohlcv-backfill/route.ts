@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase"
 import { getCrumb } from "@/lib/yahoo"
+import { intParam } from "@/lib/query-params"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300  // Vercel function timeout (5 min)
@@ -112,8 +113,8 @@ export async function GET(req: NextRequest) {
   }
 
   const url        = new URL(req.url)
-  const batchStart = Math.max(0, parseInt(url.searchParams.get("batch_start") ?? "0", 10))
-  const batchSize  = Math.max(1, Math.min(500, parseInt(url.searchParams.get("batch_size") ?? "200", 10)))
+  const batchStart = intParam(url.searchParams.get("batch_start"), { def: 0, min: 0 })
+  const batchSize  = intParam(url.searchParams.get("batch_size"), { def: 200, min: 1, max: 500 })
   const range      = url.searchParams.get("range") ?? "5d"
 
   const db = supabaseServer()

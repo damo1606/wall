@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
 import { fetchOptionChain } from "@/lib/yahoo-options"
+import { intParam } from "@/lib/query-params"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -34,8 +35,8 @@ export async function GET(req: NextRequest) {
   }
 
   const url        = new URL(req.url)
-  const batchStart = Math.max(0, parseInt(url.searchParams.get("batch_start") ?? "0", 10))
-  const batchSize  = Math.max(1, Math.min(100, parseInt(url.searchParams.get("batch_size") ?? "40", 10)))
+  const batchStart = intParam(url.searchParams.get("batch_start"), { def: 0, min: 0 })
+  const batchSize  = intParam(url.searchParams.get("batch_size"), { def: 40, min: 1, max: 100 })
 
   const db: TypedClient = supabaseServer()
   const startedAt = Date.now()
