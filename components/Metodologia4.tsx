@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Heatmap2DData } from "@/app/api/heatmap2d/route";
 import GexHeatmap2D from "@/components/GexHeatmap2D";
 import SkewPanel from "@/components/SkewPanel";
@@ -164,11 +164,16 @@ export default function Metodologia4({
     }
   }, []);
 
+  // Se dispara solo cuando el usuario pulsa Analizar (cambia analyzeKey), pero
+  // leyendo el ticker y la expiración VIGENTES. Con `[analyzeKey]` como única
+  // dependencia el efecto arrastraba los valores capturados en un render
+  // anterior y podía pintar el análisis de otro ticker.
+  const ultimaClave = useRef(0);
   useEffect(() => {
-    if (analyzeKey > 0 && ticker) {
-      fetchHeatmap(ticker, expiration);
-    }
-  }, [analyzeKey]);
+    if (analyzeKey === 0 || !ticker || ultimaClave.current === analyzeKey) return;
+    ultimaClave.current = analyzeKey;
+    fetchHeatmap(ticker, expiration);
+  }, [analyzeKey, ticker, expiration, fetchHeatmap]);
 
   return (
     <div>

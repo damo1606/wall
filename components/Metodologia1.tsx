@@ -72,11 +72,16 @@ export default function Metodologia1({
     }
   }, []);
 
+  // Se dispara solo cuando el usuario pulsa Analizar (cambia analyzeKey), pero
+  // leyendo el ticker y la expiración VIGENTES. Con `[analyzeKey]` como única
+  // dependencia el efecto arrastraba los valores capturados en un render
+  // anterior y podía pintar el análisis de otro ticker.
+  const ultimaClave = useRef(0);
   useEffect(() => {
-    if (analyzeKey > 0 && ticker) {
-      fetchAnalysis(ticker, expiration);
-    }
-  }, [analyzeKey]);
+    if (analyzeKey === 0 || !ticker || ultimaClave.current === analyzeKey) return;
+    ultimaClave.current = analyzeKey;
+    fetchAnalysis(ticker, expiration);
+  }, [analyzeKey, ticker, expiration, fetchAnalysis]);
 
   const isPositiveGamma = data ? data.spot > data.levels.gammaFlip : null;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Analysis6Result, RegimeSignal, RegimeType, FearLabel, FearComponent } from "@/lib/gex6";
 import type { Analysis5Result } from "@/lib/gex5";
 
@@ -315,7 +315,7 @@ export default function Metodologia6({
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState("");
 
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     if (!ticker.trim()) return;
     try {
       const url5 = expiration
@@ -345,13 +345,18 @@ export default function Metodologia6({
     } finally {
       setLoading(false);
     }
-  }
+  }, [ticker, expiration]);
 
+  // Se dispara solo cuando el usuario pulsa Analizar (cambia analyzeKey), pero
+  // leyendo el ticker y la expiración VIGENTES. Con `[analyzeKey]` como única
+  // dependencia el efecto arrastraba los valores capturados en un render
+  // anterior y podía pintar el análisis de otro ticker.
+  const ultimaClave = useRef(0);
   useEffect(() => {
-    if (analyzeKey > 0 && ticker) {
-      fetchAll();
-    }
-  }, [analyzeKey]);
+    if (analyzeKey === 0 || !ticker || ultimaClave.current === analyzeKey) return;
+    ultimaClave.current = analyzeKey;
+    fetchAll();
+  }, [analyzeKey, ticker, fetchAll]);
 
   const regime = data?.regime;
   const color  = regime ? regimeColor(regime) : "text-muted";

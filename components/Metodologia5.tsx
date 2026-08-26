@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Analysis5Result, SRLevel, SignalComponent, ScoredStrike } from "@/lib/gex5";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -268,11 +268,16 @@ export default function Metodologia5({
     }
   }, []);
 
+  // Se dispara solo cuando el usuario pulsa Analizar (cambia analyzeKey), pero
+  // leyendo el ticker y la expiración VIGENTES. Con `[analyzeKey]` como única
+  // dependencia el efecto arrastraba los valores capturados en un render
+  // anterior y podía pintar el análisis de otro ticker.
+  const ultimaClave = useRef(0);
   useEffect(() => {
-    if (analyzeKey > 0 && ticker) {
-      fetchAnalysis(ticker, expiration);
-    }
-  }, [analyzeKey]);
+    if (analyzeKey === 0 || !ticker || ultimaClave.current === analyzeKey) return;
+    ultimaClave.current = analyzeKey;
+    fetchAnalysis(ticker, expiration);
+  }, [analyzeKey, ticker, expiration, fetchAnalysis]);
 
   const verdictColor =
     data?.verdict === "ALCISTA" ? "text-accent" :
