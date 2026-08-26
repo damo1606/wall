@@ -26,6 +26,7 @@ import type { ExpData } from "@/lib/gex3";
 import type { Analysis6Result } from "@/lib/gex6";
 import { requireAuth } from "@/lib/api-auth"
 import { strictIntParam } from "@/lib/query-params"
+import { computeSORE, HARD_EVENT_ITEMS } from "@/lib/sore"
 
 // ── Yahoo Finance helpers ─────────────────────────────────────────────────────
 
@@ -261,110 +262,6 @@ function toVerdict(score: number): ConvictionRow["verdict"] {
   return "NEUTRAL";
 }
 
-// M1: items 8-K que fuerzan AVOID (vol explosion / tail / earnings / M&A / dilución).
-// El resto de items persistidos (5.02 exec, 5.07 voto, 7.01 Reg FD, 8.01 catch-all)
-// son rutinarios → capan el gate a WAIT en vez de bloquear todo.
-const HARD_EVENT_ITEMS = new Set([
-  "1.03", "2.04", "3.01", "4.02", "2.06", "2.05", "2.02", "5.01", "1.01", "2.01", "3.02", "1.05",
-])
-
-function computeSORE(
-  m1NetGex: number,
-  m1Pressure: number,
-  m1Pcr: number,
-  m6Vix: number,
-  m6FearScore: number,
-  m6Regime: string,
-  m6Suspended: boolean,
-  m5Score: number,
-  // EDGAR F1/F2: opcionales — si vienen null, default neutral (no afectan)
-  insiderSignal?: number | null,     // -1..+1 (net flow USD vs market cap, squashed tanh)
-  shortRatioFloat?: number | null,   // 0..1 (shares short / float)
-  // M1: 8-K rutinario (no distress) → capa el gate a WAIT (no permite GO), sin forzar AVOID
-  eventSoftCap?: boolean,
-): { css: number; dss: number; vss: number; vrp: number; strategy: string; gate: "GO" | "WAIT" | "AVOID" } {
-  // DSS: Dealer Stabilization Score
-  // GEX > 0 = dealers long gamma = buy dips / sell rips = stabilizing
-  const gexScore = m1NetGex > 0
-    ? Math.min(100, 50 + (m1NetGex / 1e9) * 25)
-    : Math.max(0, 50 + (m1NetGex / 1e9) * 15)
-  const pressScore = Math.min(100, Math.max(0, (m1Pressure + 100) / 2))
-  // PCR > 0.8: dealers sold puts = long delta = support bids under market
-  const pcrScore = m1Pcr > 1.2 ? 70 : m1Pcr > 0.8 ? 55 : m1Pcr > 0.5 ? 40 : 25
-  // F1: insider net flow del ticker. Selling fuerte = score bajo = DSS cae.
-  const insiderScore = insiderSignal == null ? 50 : Math.round((insiderSignal + 1) * 50)
-  const dss = Math.round(0.35 * gexScore + 0.30 * pressScore + 0.20 * pcrScore + 0.15 * insiderScore)
-
-  // VSS: Volatility Suppression Score
-  // fearScore 30–55 = elevated IV without panic = ideal premium selling window
-  const ivScore =
-    m6FearScore < 20 ? 15
-    : m6FearScore < 35 ? 78
-    : m6FearScore < 55 ? 65
-    : m6FearScore < 70 ? 45
-    : 25
-  const regimeScore =
-    m6Regime === "COMPRESIÓN" ? 90
-    : m6Regime === "TRANSICIÓN" ? 65
-    : m6Regime === "EXPANSIÓN" ? 35
-    : m6Regime === "PÁNICO AGUDO" ? 10
-    : m6Regime === "CRISIS SISTÉMICA" ? 5
-    : 50
-  // M5 near-neutral = range-bound = theta decay accelerates
-  const m5ConfScore = Math.abs(m5Score) < 30 ? 70 : Math.abs(m5Score) < 60 ? 50 : 28
-  const vss = Math.round(0.40 * ivScore + 0.40 * regimeScore + 0.20 * m5ConfScore)
-
-  // VRP: Vol Risk Premium proxy — VIX historically trades ~3-5pts above 20d RV
-  // VIX 12 = floor (VRP ≈ 0), VIX 37 = 100
-  let vrp = Math.round(Math.min(100, Math.max(0, (m6Vix - 12) * 4)))
-  // F2: si SI/float > 15%, el VRP per-ticker no es vendible (squeeze risk).
-  if (shortRatioFloat != null && shortRatioFloat > 0.15) {
-    vrp = Math.min(vrp, 30)
-  }
-
-  // CSS: Composite Suppression Signal
-  const css = Math.round(0.35 * dss + 0.35 * vss + 0.30 * vrp)
-
-  // Hard blocks
-  if (m6Suspended || m6Regime === "PÁNICO AGUDO" || m6Regime === "CRISIS SISTÉMICA" || css < 45) {
-    return { css, dss, vss, vrp, strategy: "AVOID", gate: "AVOID" }
-  }
-
-  let strategy: string
-  let gate: "GO" | "WAIT" | "AVOID"
-
-  // F1+F2 ban de naked sells (SHORT STRANGLE): short interest > 20% del float
-  // o insider selling fuerte → forzar a defined risk (IRON CONDOR).
-  const banNakedSells = (shortRatioFloat != null && shortRatioFloat > 0.20)
-                     || (insiderSignal != null && insiderSignal < -0.7)
-
-  if (css >= 75 && dss >= 65) {
-    gate = "GO"
-    if (banNakedSells) {
-      strategy = "IRON CONDOR"  // defined risk forzado por short interest / insider selling
-    } else if (m6Regime === "COMPRESIÓN" && m6FearScore < 60) {
-      strategy = m1Pcr > 0.9 ? "SHORT STRANGLE" : "IRON CONDOR"
-    } else if (m6FearScore < 40) {
-      strategy = "CALENDAR"
-    } else {
-      strategy = "IRON CONDOR"
-    }
-  } else if (css >= 55) {
-    gate = "WAIT"
-    strategy = m6Regime === "COMPRESIÓN" ? "CREDIT SPREAD" : "BWB"
-  } else {
-    gate = "WAIT"
-    strategy = "CREDIT SPREAD"
-  }
-
-  // M1: un 8-K rutinario (5.02/5.07/7.01/8.01) no fuerza AVOID, pero impide GO (capa a WAIT).
-  if (eventSoftCap && gate === "GO") {
-    gate = "WAIT"
-    strategy = m6Regime === "COMPRESIÓN" ? "CREDIT SPREAD" : "BWB"
-  }
-
-  return { css, dss, vss, vrp, strategy, gate }
-}
 
 // ── Per-ticker analysis ───────────────────────────────────────────────────────
 
@@ -682,14 +579,19 @@ export async function GET(request: NextRequest) {
           // insuficientes), force AVOID por el mismo codepath. No vender prima en
           // opciones que luego no se pueden cerrar. Aditivo — no toca la matemática SORE.
           const blockedByLiquidity = !m8.tradeable
-          const sore = computeSORE(
-            m1.netGex, m1.institutionalPressure, m1.putCallRatio,
-            m6.vix, m6.fearScore, m6.regime,
-            m6.signalSuspended || blockedByEvent || blockedByLiquidity,
-            m5.score,
-            insiderSignal, shortRatioFloat,
-            softEvent,
-          );
+          const sore = computeSORE({
+            m1NetGex:    m1.netGex,
+            m1Pressure:  m1.institutionalPressure,
+            m1Pcr:       m1.putCallRatio,
+            m6Vix:       m6.vix,
+            m6FearScore: m6.fearScore,
+            m6Regime:    m6.regime,
+            m6Suspended: m6.signalSuspended || blockedByEvent || blockedByLiquidity,
+            m5Score:     m5.score,
+            insiderSignal,
+            shortRatioFloat,
+            eventSoftCap: softEvent,
+          });
 
           return {
             symbol: stock.symbol,
