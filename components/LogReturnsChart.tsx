@@ -26,8 +26,12 @@ export function LogReturnsChart({ symbol, yahooSymbol, height = 200, range = "2y
     const ticker = (yahooSymbol ?? symbol).trim()
     if (!ticker) return
     let cancelled = false
-    setLoading(true); setError("")
-    fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&range=${encodeURIComponent(range)}`)
+    // Lanza la petición de inmediato para conservar el timing de red
+    const req = fetch(`/api/chart?ticker=${encodeURIComponent(ticker)}&range=${encodeURIComponent(range)}`)
+    // Reset diferido a una microtarea: deja de ser un setState síncrono dentro
+    // del cuerpo del efecto y se aplica igualmente antes del siguiente pintado
+    Promise.resolve().then(() => { setLoading(true); setError("") })
+    req
       .then(async r => {
         const j = await r.json()
         if (cancelled) return

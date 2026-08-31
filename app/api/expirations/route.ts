@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent":
@@ -43,6 +44,7 @@ function deduplicateDates(rawDates: number[]): string[] {
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   if (!ticker) {
     return NextResponse.json({ error: "ticker is required" }, { status: 400 });
@@ -103,7 +105,7 @@ export async function GET(request: NextRequest) {
     const spot = result.quote?.regularMarketPrice ?? 0;
 
     return NextResponse.json({ expirations, spot });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

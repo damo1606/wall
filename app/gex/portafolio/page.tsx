@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore } from "react";
+import Link from "next/link";
 
 const STORAGE_KEY = "sore-portafolios-v2";
 const MAX_PORTFOLIOS = 8;
@@ -23,6 +24,32 @@ function createPortfolio(name: string): Portfolio {
   };
 }
 
+// ── Portafolios guardados (localStorage) ──────────────────────────────────────
+// Snapshot seguro para SSR vía useSyncExternalStore: el servidor ve el
+// centinela `undefined` (getServerSnapshot) y el cliente el valor real tras
+// hidratar — sustituto canónico del patrón "mounted", sin hydration mismatch.
+
+let savedPortfoliosCache: Portfolio[] | null | undefined;
+
+// La limpieza al desmontar fuerza una relectura de localStorage al remontar
+const subscribeSavedPortfolios = () => () => { savedPortfoliosCache = undefined; };
+
+function readSavedPortfolios(): Portfolio[] | null | undefined {
+  if (savedPortfoliosCache === undefined) {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      savedPortfoliosCache = saved ? (JSON.parse(saved) as Portfolio[]) : null;
+    } catch {
+      savedPortfoliosCache = null;
+    }
+  }
+  return savedPortfoliosCache;
+}
+
+function readSavedPortfoliosServer(): Portfolio[] | null | undefined {
+  return undefined;
+}
+
 export default function PortafolioPage() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [activeId, setActiveId] = useState<string>("");
@@ -34,25 +61,22 @@ export default function PortafolioPage() {
   const searchRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
-  // Load from localStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed: Portfolio[] = JSON.parse(saved);
-        setPortfolios(parsed);
-        setActiveId(parsed[0]?.id ?? "");
-      } else {
-        const first = createPortfolio("PORTAFOLIO 1");
-        setPortfolios([first]);
-        setActiveId(first.id);
-      }
-    } catch {
+  // Restaura los portafolios guardados una sola vez, durante el render: en la
+  // hidratación el snapshot es `undefined` (coincide con el servidor) y justo
+  // después llega el valor real — sin setState síncrono en efectos ni mismatch.
+  const savedPortfolios = useSyncExternalStore(subscribeSavedPortfolios, readSavedPortfolios, readSavedPortfoliosServer);
+  const [restored, setRestored] = useState(false);
+  if (!restored && savedPortfolios !== undefined) {
+    setRestored(true);
+    if (savedPortfolios !== null) {
+      setPortfolios(savedPortfolios);
+      setActiveId(savedPortfolios[0]?.id ?? "");
+    } else {
       const first = createPortfolio("PORTAFOLIO 1");
       setPortfolios([first]);
       setActiveId(first.id);
     }
-  }, []);
+  }
 
   // Persist to localStorage
   useEffect(() => {
@@ -61,9 +85,17 @@ export default function PortafolioPage() {
     }
   }, [portfolios]);
 
+  // Limpia las sugerencias durante el render cuando el query queda vacío
+  // (patrón "prev state" — evita setState síncrono dentro del efecto)
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (prevQuery !== query) {
+    setPrevQuery(query);
+    if (query.length < 1) setSuggestions([]);
+  }
+
   // Debounced autocomplete
   useEffect(() => {
-    if (query.length < 1) { setSuggestions([]); return; }
+    if (query.length < 1) return;
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
@@ -225,7 +257,9 @@ export default function PortafolioPage() {
                     value={query}
                     onChange={(e) => setQuery(e.target.value.toUpperCase())}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") { suggestions.length > 0 ? addTicker(suggestions[0].symbol) : addTicker(query); }
+                      if (e.key === "Enter") {
+                        if (suggestions.length > 0) { addTicker(suggestions[0].symbol); } else { addTicker(query); }
+                      }
                       if (e.key === "Escape") setShowSuggestions(false);
                     }}
                     onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
@@ -251,7 +285,9 @@ export default function PortafolioPage() {
                   )}
                 </div>
                 <button
-                  onClick={() => { suggestions.length > 0 ? addTicker(suggestions[0].symbol) : addTicker(query); }}
+                  onClick={() => {
+                    if (suggestions.length > 0) { addTicker(suggestions[0].symbol); } else { addTicker(query); }
+                  }}
                   className="bg-accent text-white px-5 py-2.5 text-sm font-bold tracking-widest hover:opacity-80 transition-opacity shrink-0"
                 >
                   + AGREGAR
@@ -288,9 +324,9 @@ export default function PortafolioPage() {
                     ))}
                   </div>
                   <div className="mt-6 flex gap-3">
-                    <a href="/" className="text-xs text-muted border border-border px-4 py-2 tracking-widest hover:text-accent hover:border-accent transition-colors">
+                    <Link href="/" className="text-xs text-muted border border-border px-4 py-2 tracking-widest hover:text-accent hover:border-accent transition-colors">
                       IR AL ANÁLISIS
-                    </a>
+                    </Link>
                     <button
                       onClick={() => { if (confirm("¿Eliminar todos los tickers?")) updateActive((p) => ({ ...p, tickers: [] })); }}
                       className="text-xs text-muted border border-border px-4 py-2 tracking-widest hover:text-danger hover:border-danger transition-colors"

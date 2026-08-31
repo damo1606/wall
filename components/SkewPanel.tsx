@@ -35,14 +35,11 @@ function ChartSummary({ lines }: { lines: string[] }) {
 function buildStrikeSkewSummary(
   strikeSkew: { strike: number; skew: number }[],
   support: number,
-  resistance: number,
-  spot: number
+  resistance: number
 ): string[] {
   const sorted     = [...strikeSkew].sort((a, b) => a.skew - b.skew);
   const mostNeg    = sorted[0];
-  const mostPos    = sorted[sorted.length - 1];
   const negCount   = strikeSkew.filter((s) => s.skew < 0).length;
-  const posCount   = strikeSkew.filter((s) => s.skew > 0).length;
   const supSkew    = strikeSkew.find((s) => s.strike === support);
   const resSkew    = strikeSkew.find((s) => s.strike === resistance);
   const avgSkew    = strikeSkew.reduce((a, b) => a + b.skew, 0) / strikeSkew.length;
@@ -198,7 +195,7 @@ export default function SkewPanel({ data }: { data: Heatmap2DData }) {
             </Bar>
           </BarChart>
         </ResponsiveContainer>
-        <ChartSummary lines={buildStrikeSkewSummary(strikeSkew, support, resistance, spot)} />
+        <ChartSummary lines={buildStrikeSkewSummary(strikeSkew, support, resistance)} />
       </div>
 
       {/* ── Gráfico 2: Term structure 25Δ ── */}

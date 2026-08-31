@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeAnalysis3, type ExpData } from "@/lib/gex3";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent":
@@ -50,13 +51,28 @@ async function fetchOptions(
   return result;
 }
 
-function parseChain(optData: any): { calls: any[]; puts: any[] } {
-  const calls = (optData?.calls ?? []).map((c: any) => ({
+// Contrato crudo de la cadena de opciones de Yahoo Finance (solo los campos que usamos).
+interface YahooOptionContract {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+}
+
+// Bloque options[0] de la respuesta de Yahoo.
+interface YahooOptionsData {
+  calls?: YahooOptionContract[];
+  puts?: YahooOptionContract[];
+}
+
+function parseChain(
+  optData: YahooOptionsData | null | undefined
+): { calls: ExpData["calls"]; puts: ExpData["puts"] } {
+  const calls = (optData?.calls ?? []).map((c) => ({
     strike: c.strike ?? 0,
     impliedVolatility: c.impliedVolatility ?? 0,
     openInterest: c.openInterest ?? 0,
   }));
-  const puts = (optData?.puts ?? []).map((p: any) => ({
+  const puts = (optData?.puts ?? []).map((p) => ({
     strike: p.strike ?? 0,
     impliedVolatility: p.impliedVolatility ?? 0,
     openInterest: p.openInterest ?? 0,
@@ -65,6 +81,7 @@ function parseChain(optData: any): { calls: any[]; puts: any[] } {
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   const expiration = request.nextUrl.searchParams.get("expiration") ?? undefined;
   if (!ticker) {
@@ -112,7 +129,10 @@ export async function GET(request: NextRequest) {
 
     const analysis = computeAnalysis3(ticker, spot, expDataList);
     return NextResponse.json({ ...analysis, availableExpirations });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e: unknown) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Unknown error" },
+      { status: 500 }
+    );
   }
 }

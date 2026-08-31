@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeAnalysis } from "@/lib/gex";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent":
@@ -8,6 +9,13 @@ const HEADERS = {
   "Accept-Language": "en-US,en;q=0.9",
   Referer: "https://finance.yahoo.com/",
 };
+
+// Contrato crudo de la cadena de opciones de Yahoo Finance (solo los campos que usamos).
+interface YahooOptionContract {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+}
 
 async function getCredentials(): Promise<{ crumb: string; cookie: string }> {
   // Step 1: hit Yahoo to get session cookie
@@ -58,6 +66,7 @@ async function fetchOptions(
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase();
   const expiration = request.nextUrl.searchParams.get("expiration") ?? undefined;
 
@@ -105,13 +114,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const rawCalls = (optData.calls ?? []).map((c: any) => ({
+    const rawCalls = (optData.calls ?? []).map((c: YahooOptionContract) => ({
       strike: c.strike ?? 0,
       impliedVolatility: c.impliedVolatility ?? 0,
       openInterest: c.openInterest ?? 0,
     }));
 
-    const rawPuts = (optData.puts ?? []).map((p: any) => ({
+    const rawPuts = (optData.puts ?? []).map((p: YahooOptionContract) => ({
       strike: p.strike ?? 0,
       impliedVolatility: p.impliedVolatility ?? 0,
       openInterest: p.openInterest ?? 0,
@@ -127,9 +136,9 @@ export async function GET(request: NextRequest) {
     );
 
     return NextResponse.json(result);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
-      { error: e.message ?? "Unknown error" },
+      { error: e instanceof Error ? e.message : "Unknown error" },
       { status: 500 }
     );
   }

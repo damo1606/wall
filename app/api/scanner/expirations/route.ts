@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -21,6 +22,7 @@ async function getCredentials(): Promise<{ crumb: string; cookie: string }> {
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   try {
     const { searchParams } = new URL(request.url);
     const ticker = searchParams.get("ticker") ?? "SPY";
@@ -41,7 +43,7 @@ export async function GET(request: NextRequest) {
     }));
 
     return NextResponse.json({ expirations });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

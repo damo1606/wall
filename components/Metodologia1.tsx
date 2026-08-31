@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { AnalysisResult } from "@/types";
 import LevelsPanel from "@/components/LevelsPanel";
 import GexChart from "@/components/GexChart";
@@ -45,9 +45,10 @@ export default function Metodologia1({
   const [error, setError] = useState("");
 
   const fetchAnalysis = useCallback(async (t: string, exp: string) => {
-    setLoading(true);
-    setError("");
     try {
+      setLoading(true);
+      setError("");
+
       const url = exp
         ? `/api/analysis?ticker=${t}&expiration=${exp}`
         : `/api/analysis?ticker=${t}`;
@@ -63,18 +64,24 @@ export default function Metodologia1({
       const chartJson = await chartRes.json();
       setData(analysisJson);
       setCandles(chartJson.candles ?? []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Se dispara solo cuando el usuario pulsa Analizar (cambia analyzeKey), pero
+  // leyendo el ticker y la expiración VIGENTES. Con `[analyzeKey]` como única
+  // dependencia el efecto arrastraba los valores capturados en un render
+  // anterior y podía pintar el análisis de otro ticker.
+  const ultimaClave = useRef(0);
   useEffect(() => {
-    if (analyzeKey > 0 && ticker) {
-      fetchAnalysis(ticker, expiration);
-    }
-  }, [analyzeKey]);
+    if (analyzeKey === 0 || !ticker || ultimaClave.current === analyzeKey) return;
+    ultimaClave.current = analyzeKey;
+    fetchAnalysis(ticker, expiration);
+  }, [analyzeKey, ticker, expiration, fetchAnalysis]);
 
   const isPositiveGamma = data ? data.spot > data.levels.gammaFlip : null;
 

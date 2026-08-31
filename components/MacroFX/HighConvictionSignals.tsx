@@ -1,7 +1,6 @@
 "use client"
 
 import type { Currency, CurrencyScore, PairScore } from '@/types/forex'
-import { CURRENCIES } from '@/lib/forex'
 
 interface Props {
   scores: Record<Currency, CurrencyScore>

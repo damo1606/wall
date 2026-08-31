@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -14,9 +15,34 @@ export interface SearchResult {
   type: string;
 }
 
+// Shape mínimo de los quotes de v1/finance/search de Yahoo.
+type YahooSearchQuote = {
+  symbol?: string;
+  shortname?: string;
+  longname?: string;
+  exchDisp?: string;
+  exchange?: string;
+  quoteType?: string;
+};
+
+// Shape mínimo de los items de v6/finance/autocomplete de Yahoo.
+type YahooAutocompleteItem = {
+  symbol?: string;
+  name?: string;
+  exch?: string;
+  typeDisp?: string;
+};
+
 export async function GET(request: NextRequest) {
-  const q = request.nextUrl.searchParams.get("q")?.trim();
-  if (!q || q.length < 1) return NextResponse.json({ results: [] });
+  const denied = await requireAuth(); if (denied) return denied;
+  // Sin `q` es una petición mal formada, no una búsqueda sin resultados: un 200
+  // con lista vacía hace que el cliente no distinga los dos casos.
+  const raw = request.nextUrl.searchParams.get("q");
+  if (raw == null) {
+    return NextResponse.json({ error: "Falta el parámetro 'q'" }, { status: 400 });
+  }
+  const q = raw.trim();
+  if (q.length < 1) return NextResponse.json({ results: [] });
 
   try {
     // Get crumb + cookie for authenticated requests
@@ -37,8 +63,8 @@ export async function GET(request: NextRequest) {
       const json = await res1.json();
       const quotes = json?.quotes ?? [];
       const results: SearchResult[] = quotes
-        .filter((q: any) => ["EQUITY", "ETF", "INDEX"].includes(q.quoteType))
-        .map((q: any) => ({
+        .filter((q: YahooSearchQuote) => ["EQUITY", "ETF", "INDEX"].includes(q.quoteType ?? ""))
+        .map((q: YahooSearchQuote) => ({
           symbol:   q.symbol ?? "",
           name:     q.shortname ?? q.longname ?? q.symbol ?? "",
           exchange: q.exchDisp ?? q.exchange ?? "",
@@ -56,9 +82,9 @@ export async function GET(request: NextRequest) {
     const json2 = await res2.json();
     const items = json2?.ResultSet?.Result ?? [];
     const results2: SearchResult[] = items
-      .filter((r: any) => r.symbol && !r.symbol.includes("="))
+      .filter((r: YahooAutocompleteItem) => r.symbol && !r.symbol.includes("="))
       .slice(0, 8)
-      .map((r: any) => ({
+      .map((r: YahooAutocompleteItem) => ({
         symbol:   r.symbol ?? "",
         name:     r.name ?? r.symbol ?? "",
         exchange: r.exch ?? "",

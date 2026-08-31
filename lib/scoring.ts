@@ -1,14 +1,16 @@
 import type { StockData } from "./yahoo"
 import { getSectorConfig } from "./sectors"
+import { buildAnalystConsensus, type AnalystConsensus } from "./analyst-consensus"
 import {
   MICRO_CAP_MAX, SMALL_CAP_MAX, MID_CAP_MAX,
   CAP_FACTOR_MICRO, CAP_FACTOR_SMALL,
   GRADE_A_PLUS, GRADE_A, GRADE_B, GRADE_C, GRADE_D,
   BUY_READY_QUALITY_MIN, BUY_READY_PRICE_MIN, BUY_READY_DROP_MAX,
-  MISSING_DATA_SCORE, MIN_ANALYST_COUNT, WEAK_ANALYST_FACTOR,
+  MISSING_DATA_SCORE, MIN_ANALYST_COUNT,
   FCF_CONVERSION_GREAT, FCF_CONVERSION_GOOD, FCF_CONVERSION_WEAK,
   INSIDER_OWNERSHIP_GREAT, INSIDER_OWNERSHIP_GOOD,
   ROIC_PREMIUM_STRONG, ROIC_PREMIUM_GREAT,
+  DISPERSION_WIDE,
 } from "./constants"
 
 // Interpola linealmente entre breakpoints
@@ -67,8 +69,12 @@ export type ScoreBreakdown = {
   evEbitdaScore: number
   grahamScore: number      // descuento vs Graham Number (0 si EPS/BookValue negativos)
   lynchScore: number       // descuento vs Lynch Fair Value (EPS * 15)
-  upsideScore: number
+  upsideScore: number      // consenso de analistas: escenario esperado + rating, atenuado por confianza
   priceScore: number       // 0-100
+
+  // Consenso de analistas — escenario bajista/base/alcista, rating y dispersión.
+  // Alimenta upsideScore; se expone entero para que la UI no lo recalcule.
+  consensus: AnalystConsensus
 
   // Totales
   qualityScore: number     // Pilar 1+2+3 (0-100)
@@ -283,11 +289,23 @@ export function scoreStock(s: StockData): ScoreBreakdown {
     ? clamp(lerp(s.discountToLynch, [-40, -10, 20, 50], [0, 25, 65, 100]))
     : MISSING_DATA_SCORE
 
-  const upsideScore = (s.analystTarget > 0 && s.analystCount >= MIN_ANALYST_COUNT)
-    ? clamp(lerp(s.upsideToTarget, [-10, 0, 15, 35], [0, 20, 60, 100]))
-    : s.analystTarget > 0
-      ? clamp(lerp(s.upsideToTarget, [-10, 0, 15, 35], [0, 20, 60, 100])) * WEAK_ANALYST_FACTOR
-      : MISSING_DATA_SCORE
+  // Consenso de analistas: en vez de puntuar el upside a la media, se puntúa el
+  // upside ESPERADO del escenario (bajista/base/alcista ponderado por el rating)
+  // y se atenúa por la confianza (cobertura × acuerdo entre analistas). Sustituye
+  // al antiguo corte binario por MIN_ANALYST_COUNT / WEAK_ANALYST_FACTOR, que
+  // trataba igual a 3 analistas de acuerdo que a 3 con targets al doble y mitad.
+  const consensus = buildAnalystConsensus({
+    currentPrice:       s.currentPrice,
+    targetMean:         s.analystTarget > 0 ? s.analystTarget : null,
+    targetMedian:       s.analystTargetMedian ?? null,
+    targetHigh:         s.analystTargetHigh   ?? null,
+    targetLow:          s.analystTargetLow    ?? null,
+    analystCount:       s.analystCount,
+    recommendationMean: s.recommendationMean  ?? null,
+    recommendationKey:  s.recommendationKey   ?? null,
+  })
+
+  const upsideScore = consensus.consensusScore ?? MISSING_DATA_SCORE
 
   const priceScore = clamp(
     pfcfScore     * 0.30 +
@@ -344,8 +362,20 @@ export function scoreStock(s: StockData): ScoreBreakdown {
   if (s.pFcf > 0 && s.pFcf < 15)  strengths.push(`P/FCF ${s.pFcf.toFixed(1)}x — precio atractivo vs flujo de caja`)
   if (s.grahamNumber > 0 && s.discountToGraham >= 20) strengths.push(`${s.discountToGraham.toFixed(0)}% por debajo del Graham Number ($${s.grahamNumber.toFixed(0)})`)
   if (s.lynchValue > 0 && s.discountToLynch >= 20)    strengths.push(`${s.discountToLynch.toFixed(0)}% por debajo del valor Lynch ($${s.lynchValue.toFixed(0)})`)
-  if (s.upsideToTarget >= 20 && s.analystCount >= 3)  strengths.push(`+${s.upsideToTarget.toFixed(0)}% upside según ${s.analystCount} analistas`)
-  else if (s.upsideToTarget >= 20)                    strengths.push(`+${s.upsideToTarget.toFixed(0)}% upside según analistas`)
+  // Upside sobre el escenario esperado, no sobre la media cruda. El caso fuerte
+  // exige además que el consenso sea creíble: cobertura suficiente y targets juntos.
+  if (consensus.available && (consensus.expectedUpside ?? 0) >= 20) {
+    const up = `+${(consensus.expectedUpside ?? 0).toFixed(0)}% de upside esperado`
+    if (consensus.count >= MIN_ANALYST_COUNT && consensus.dispersionLabel !== "DISPERSO") {
+      const rat = consensus.rating ? ` con consenso ${consensus.rating.label}` : ""
+      strengths.push(`${up} según ${consensus.count} analistas${rat}`)
+    } else {
+      strengths.push(`${up} según analistas — consenso poco firme`)
+    }
+  }
+  if (consensus.rating && consensus.rating.mean <= 2.0 && consensus.count >= MIN_ANALYST_COUNT) {
+    strengths.push(`Consenso ${consensus.rating.label} (${consensus.rating.mean.toFixed(1)}/5) entre ${consensus.count} analistas`)
+  }
   if (s.earningsGrowth * 100 >= 15) strengths.push(`Crecimiento EPS ${(s.earningsGrowth * 100).toFixed(0)}% — momentum de ganancias`)
   if (s.revenueGrowth * 100 >= adjSector.revenueGrowthBp[2]) strengths.push(`Revenue +${(s.revenueGrowth * 100).toFixed(0)}% — crecimiento por encima de lo esperado para el sector`)
   if (fcfConversion >= FCF_CONVERSION_GOOD && netIncome > 0) strengths.push(`FCF conversion ${(fcfConversion * 100).toFixed(0)}% — ganancias contables respaldadas por cash real`)
@@ -368,6 +398,16 @@ export function scoreStock(s: StockData): ScoreBreakdown {
   if (s.netMargin * 100 < adjSector.netMarginBp[1]) weaknesses.push(`Margen neto ${(s.netMargin * 100).toFixed(0)}% — márgenes por debajo de lo esperado para el sector`)
   if (s.revenueGrowth * 100 < adjSector.revenueGrowthBp[1] && s.revenueGrowth > -0.05) weaknesses.push(`Revenue +${(s.revenueGrowth * 100).toFixed(0)}% — crecimiento por debajo del promedio sectorial`)
   if (netIncome > 0 && fcfConversion < FCF_CONVERSION_WEAK) weaknesses.push(`FCF conversion ${(fcfConversion * 100).toFixed(0)}% — las ganancias no se reflejan en cash (calidad dudosa)`)
+  if (consensus.available && (consensus.expectedUpside ?? 0) < 0) weaknesses.push(`Cotiza por encima del objetivo de consenso (${(consensus.expectedUpside ?? 0).toFixed(0)}% de recorrido esperado)`)
+  if (consensus.rating && consensus.rating.mean >= 3.5 && consensus.count >= MIN_ANALYST_COUNT) {
+    weaknesses.push(`Consenso ${consensus.rating.label} (${consensus.rating.mean.toFixed(1)}/5) — los analistas recomiendan reducir`)
+  }
+  if (consensus.dispersion !== null && consensus.dispersion >= DISPERSION_WIDE) {
+    weaknesses.push(`Objetivos dispersos ${consensus.dispersion.toFixed(0)}% entre el más alto y el más bajo — los analistas no coinciden en la valoración`)
+  }
+  if (consensus.available && consensus.count > 0 && consensus.count < MIN_ANALYST_COUNT) {
+    weaknesses.push(`Solo ${consensus.count} ${consensus.count === 1 ? "analista cubre" : "analistas cubren"} el valor — el objetivo de consenso es frágil`)
+  }
 
   // ── Dividendos ────────────────────────────────────────────────────────────
   let dividendScore: number | null = null
@@ -437,6 +477,7 @@ export function scoreStock(s: StockData): ScoreBreakdown {
     grahamScore:          Math.round(grahamScore),
     lynchScore:           Math.round(lynchScore),
     upsideScore:          Math.round(upsideScore),
+    consensus,
     priceScore:           Math.round(priceScore),
     qualityScore:         Math.round(qualityScore),
     finalScore:           Math.round(finalScore),
@@ -497,11 +538,9 @@ function buildSignal(
   // ── Matriz Quality × Price ────────────────────────────────────────────────
   const qAlta  = qualityScore >= 65
   const qMedia = qualityScore >= 45 && qualityScore < 65
-  const qBaja  = qualityScore < 45
 
   const pBarato = priceScore >= 55
   const pJusto  = priceScore >= 35 && priceScore < 55
-  const pCaro   = priceScore < 35
 
   // Calidad Alta
   if (qAlta) {

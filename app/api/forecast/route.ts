@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { fetchPriceHistory } from "@/lib/yahoo"
 import { forecast } from "@/lib/forecast"
+import { requireAuth } from "@/lib/api-auth"
 
 // Pronóstico estable a diario — el modelo no cambia intradía.
 export const revalidate = 86400
@@ -10,6 +11,7 @@ export const revalidate = 86400
  * GET ?symbol=AAPL&steps=30 → precio proyectado + banda de volatilidad 95%.
  */
 export async function GET(req: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const symbol = req.nextUrl.searchParams.get("symbol")?.trim().toUpperCase()
   const steps = Math.min(Math.max(Number(req.nextUrl.searchParams.get("steps")) || 30, 5), 120)
   if (!symbol) {

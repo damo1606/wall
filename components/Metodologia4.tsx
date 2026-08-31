@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Heatmap2DData } from "@/app/api/heatmap2d/route";
 import GexHeatmap2D from "@/components/GexHeatmap2D";
 import SkewPanel from "@/components/SkewPanel";
@@ -141,28 +141,39 @@ export default function Metodologia4({
   const [error, setError] = useState("");
 
   const fetchHeatmap = useCallback(async (t: string, exp: string) => {
-    setLoading(true);
-    setError("");
     try {
       const url = exp
         ? `/api/heatmap2d?ticker=${t}&upTo=${exp}`
         : `/api/heatmap2d?ticker=${t}`;
-      const res = await fetch(url);
+      // Lanza la petición de inmediato para conservar el timing de red
+      const resPromise = fetch(url);
+      // Tras el primer await, estos setState ya no se ejecutan de forma
+      // síncrona dentro del cuerpo del efecto que invoca esta función
+      await Promise.resolve();
+      setLoading(true);
+      setError("");
+      const res = await resPromise;
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Error");
       setData(json);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Se dispara solo cuando el usuario pulsa Analizar (cambia analyzeKey), pero
+  // leyendo el ticker y la expiración VIGENTES. Con `[analyzeKey]` como única
+  // dependencia el efecto arrastraba los valores capturados en un render
+  // anterior y podía pintar el análisis de otro ticker.
+  const ultimaClave = useRef(0);
   useEffect(() => {
-    if (analyzeKey > 0 && ticker) {
-      fetchHeatmap(ticker, expiration);
-    }
-  }, [analyzeKey]);
+    if (analyzeKey === 0 || !ticker || ultimaClave.current === analyzeKey) return;
+    ultimaClave.current = analyzeKey;
+    fetchHeatmap(ticker, expiration);
+  }, [analyzeKey, ticker, expiration, fetchHeatmap]);
 
   return (
     <div>

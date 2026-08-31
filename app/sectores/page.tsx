@@ -392,7 +392,7 @@ function pctColor(v: number | null) {
   if (v >= -10)  return "text-orange-400"
   return "text-red-400"
 }
-function interpretation(change52w: number | null, ytd: number | null): string {
+function interpretation(change52w: number | null): string {
   if (change52w === null) return "Sin datos disponibles."
   if (change52w >= 25)  return "Sector en tendencia alcista fuerte — el mercado lo está priorizando."
   if (change52w >= 10)  return "Rendimiento sólido en los últimos 12 meses — por encima del promedio."
@@ -406,19 +406,24 @@ export default function Sectores() {
   const [active, setActive] = useState("tech")
   const [etfs,   setEtfs]   = useState<EtfData[]>([])
   const [loading, setLoading] = useState(true)
-  const [etfError, setEtfError] = useState(false)
 
-  function fetchEtfs() {
-    setLoading(true)
-    setEtfError(false)
+  // Pide los ETFs; los setState ocurren en callbacks del fetch (asíncronos)
+  function loadEtfs() {
     fetch("/api/sectors-etf")
       .then(r => r.json())
-      .then(d => { if (d?.etfs) setEtfs(d.etfs); else setEtfError(true) })
-      .catch(() => setEtfError(true))
+      .then(d => { if (d?.etfs) setEtfs(d.etfs) })
+      .catch(() => {})
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchEtfs() }, [])
+  // Reintento manual: reactiva el estado de carga antes de volver a pedir datos
+  function fetchEtfs() {
+    setLoading(true)
+    loadEtfs()
+  }
+
+  // Al montar, `loading` ya arranca en true — basta con disparar la carga
+  useEffect(() => { loadEtfs() }, [])
 
   const sector  = SECTORS.find(s => s.key === active)!
   const etfData = etfs.find(e => e.sector === ETF_MAP[active]) ?? null
@@ -572,7 +577,7 @@ export default function Sectores() {
                   {/* Interpretación */}
                   <p className="text-xs text-gray-400 leading-relaxed border-t border-gray-800 pt-3">
                     <strong className="text-gray-300">Lectura: </strong>
-                    {interpretation(etfData.change52w, etfData.ytdReturn)}
+                    {interpretation(etfData.change52w)}
                     {etfData.change52w !== null && etfData.ytdReturn !== null && (
                       <span className="text-gray-600">
                         {" "}El ETF {ETF_SYMBOL[active]} acumula {pct(etfData.ytdReturn)} en lo que va del año

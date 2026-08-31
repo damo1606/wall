@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS } from "@/lib/symbols"
 import type { StockData } from "@/lib/yahoo"
@@ -26,7 +26,7 @@ function getSortValue(s: Scored, col: SortCol): number {
     case "drop":    return -s.dropFrom52w          // más negativo = mayor caída = valor más alto al ordenar
     case "pfcf":    return s.pFcf > 0 ? -s.pFcf : -999
     case "graham":  return s.discountToGraham
-    case "upside":  return s.upsideToTarget
+    case "upside":  return s.score.consensus.expectedUpside ?? 0
   }
 }
 
@@ -93,15 +93,6 @@ function pct(v: number) {
   return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`
 }
 
-function SignalBadge({ signal }: { signal: Signal }) {
-  const s = SIGNAL_STYLE[signal]
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded ${s.badge}`}>
-      {s.icon} {signal}
-    </span>
-  )
-}
-
 function GradeBadge({ grade }: { grade: string }) {
   const color =
     grade === "A+" ? "bg-emerald-500 text-white" :
@@ -111,6 +102,41 @@ function GradeBadge({ grade }: { grade: string }) {
     grade === "D"  ? "bg-orange-600 text-white" :
     "bg-red-800 text-white"
   return <span className={`text-xs font-black px-2 py-0.5 rounded ${color}`}>{grade}</span>
+}
+
+// ── Historial de escaneos (localStorage) como store externo ─────────────────
+// useSyncExternalStore evita el setState síncrono en un efecto y el hydration
+// mismatch: durante la hidratación se usa el snapshot del servidor (lista vacía)
+// y React re-renderiza después con lo leído de localStorage.
+type HistoryEntry = { date: string; universe: string; compras: number; ventas: number }
+
+const HISTORY_KEY = "wall_signals_history"
+const EMPTY_HISTORY: HistoryEntry[] = []
+let historySnapshot: HistoryEntry[] | null = null
+const historyListeners = new Set<() => void>()
+
+function getHistorySnapshot(): HistoryEntry[] {
+  if (historySnapshot === null) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]")
+      historySnapshot = Array.isArray(saved) ? saved : EMPTY_HISTORY
+    } catch {
+      historySnapshot = EMPTY_HISTORY
+    }
+  }
+  return historySnapshot
+}
+function getHistoryServerSnapshot(): HistoryEntry[] {
+  return EMPTY_HISTORY
+}
+function writeHistory(next: HistoryEntry[]) {
+  historySnapshot = next
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(next))
+  historyListeners.forEach(l => l())
+}
+function subscribeHistory(listener: () => void): () => void {
+  historyListeners.add(listener)
+  return () => historyListeners.delete(listener)
 }
 
 export default function SenalesPage() {
@@ -124,15 +150,7 @@ export default function SenalesPage() {
   const [sortBy, setSortBy]     = useState<SortCol>("final")
   const [sortDir, setSortDir]   = useState<"asc" | "desc">("desc")
 
-  type HistoryEntry = { date: string; universe: string; compras: number; ventas: number }
-  const [history, setHistory] = useState<HistoryEntry[]>([])
-
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("wall_signals_history") ?? "[]")
-      if (Array.isArray(saved)) setHistory(saved)
-    } catch {}
-  }, [])
+  const history = useSyncExternalStore(subscribeHistory, getHistorySnapshot, getHistoryServerSnapshot)
 
   function handleSort(col: SortCol) {
     if (sortBy === col) setSortDir(d => d === "desc" ? "asc" : "desc")
@@ -209,10 +227,8 @@ export default function SenalesPage() {
         compras,
         ventas,
       }
-      const prev = JSON.parse(localStorage.getItem("wall_signals_history") ?? "[]") as HistoryEntry[]
-      const next = [entry, ...prev].slice(0, 5)
-      localStorage.setItem("wall_signals_history", JSON.stringify(next))
-      setHistory(next)
+      const prev = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]") as HistoryEntry[]
+      writeHistory([entry, ...prev].slice(0, 5))
     } catch {}
   }
 
@@ -456,9 +472,14 @@ export default function SenalesPage() {
                             </span>
                           </td>
                           <td className="px-3 py-3 text-right">
-                            <span className={`font-mono ${stock.upsideToTarget >= 20 ? "text-green-400" : stock.upsideToTarget >= 0 ? "text-yellow-300" : "text-red-400"}`}>
-                              {stock.analystTarget > 0 ? pct(stock.upsideToTarget) : "—"}
-                            </span>
+                            {(() => {
+                              const up = stock.score.consensus.expectedUpside ?? 0
+                              return (
+                                <span className={`font-mono ${up >= 20 ? "text-green-400" : up >= 0 ? "text-yellow-300" : "text-red-400"}`}>
+                                  {stock.score.consensus.available ? pct(up) : "—"}
+                                </span>
+                              )
+                            })()}
                           </td>
                           <td className="px-4 py-3 text-xs text-gray-400 max-w-[260px]">
                             {br.finalReason}

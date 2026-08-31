@@ -36,7 +36,8 @@ export async function GET() {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const rows = (data ?? []).map((r: any) => ({
+  // El cliente Supabase tipado (Database) infiere la fila, incluido el embed symbols(ticker, name).
+  const rows = (data ?? []).map((r) => ({
     id: r.id,
     added_at: r.added_at,
     notes: r.notes,

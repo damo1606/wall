@@ -2,10 +2,12 @@
 
 import { useParams } from "next/navigation"
 import Link from "next/link"
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
+import type { IChartApi, ISeriesApi } from "lightweight-charts"
 import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
 import type { ScoreBreakdown } from "@/lib/scoring"
+import type { AnalystConsensus } from "@/lib/analyst-consensus"
 import { analyzeForward } from "@/lib/forward"
 import { ErrorBoundary } from "@/app/ErrorBoundary"
 import type { ForwardAnalysis } from "@/lib/forward"
@@ -18,7 +20,6 @@ type FullData = StockData & { score: ScoreBreakdown; forward: ForwardAnalysis; b
 
 function pct(v: number, dec = 1) { return `${v >= 0 ? "+" : ""}${v.toFixed(dec)}%` }
 function usd(v: number) { return v > 0 ? `$${v.toFixed(2)}` : "—" }
-function fmt(v: number, dec = 1) { return v !== 0 ? v.toFixed(dec) : "—" }
 
 function GradeBadge({ grade }: { grade: string }) {
   const color =
@@ -56,6 +57,135 @@ function MetricRow({ label, value, good }: { label: string; value: string; good?
   )
 }
 
+// ─── Escenario de precios objetivo (consenso de analistas) ──────────────────
+
+function RatingBadge({ rating }: { rating: NonNullable<AnalystConsensus["rating"]> }) {
+  const color =
+    rating.mean <= 1.5 ? "bg-emerald-600" :
+    rating.mean <= 2.5 ? "bg-green-700"  :
+    rating.mean <= 3.5 ? "bg-gray-700"   :
+    rating.mean <= 4.5 ? "bg-orange-700" : "bg-red-800"
+  return (
+    <span className={`${color} text-white text-[10px] font-black px-2 py-1 rounded tracking-wider whitespace-nowrap`}>
+      {rating.label} · {rating.mean.toFixed(1)}/5
+    </span>
+  )
+}
+
+function ScenarioColumn({ s, accent }: { s: AnalystConsensus["scenarios"][number]; accent: string }) {
+  return (
+    <div className="flex-1 min-w-0">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-0.5">{s.label}</div>
+      <div className="font-mono text-lg font-bold text-white">${s.price.toFixed(2)}</div>
+      <div className={`font-mono text-xs font-bold ${s.upside >= 0 ? "text-green-400" : "text-red-400"}`}>
+        {s.upside >= 0 ? "+" : ""}{s.upside.toFixed(1)}%
+      </div>
+      <div className="mt-1.5 h-1 w-full bg-gray-800 rounded-full overflow-hidden">
+        <div className={`h-1 rounded-full ${accent}`} style={{ width: `${Math.round(s.weight * 100)}%` }} />
+      </div>
+      <div className="text-[10px] text-gray-600 mt-0.5 font-mono">{Math.round(s.weight * 100)}% peso</div>
+    </div>
+  )
+}
+
+function ConsensusPanel({ consensus, currentPrice }: { consensus: AnalystConsensus; currentPrice: number }) {
+  if (!consensus.available) {
+    return (
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+        <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Escenario de Precios Objetivo</h2>
+        <div className="text-sm text-gray-500">Sin cobertura de analistas — Yahoo no publica precio objetivo para este valor.</div>
+      </div>
+    )
+  }
+
+  const bear = consensus.scenarios.find(s => s.key === "bear")
+  const bull = consensus.scenarios.find(s => s.key === "bull")
+
+  // Escala del track: siempre incluye el precio actual, aunque quede fuera del rango.
+  const lo = Math.min(bear?.price ?? currentPrice, currentPrice)
+  const hi = Math.max(bull?.price ?? currentPrice, currentPrice)
+  const span = hi - lo
+  const posOf = (p: number) => (span > 0 ? Math.max(0, Math.min(100, ((p - lo) / span) * 100)) : 50)
+
+  const dispColor =
+    consensus.dispersionLabel === "APRETADO" ? "text-green-400" :
+    consensus.dispersionLabel === "MODERADO" ? "text-yellow-300" : "text-orange-400"
+  const confColor =
+    consensus.confidence >= 70 ? "text-green-400" :
+    consensus.confidence >= 45 ? "text-yellow-300" : "text-red-400"
+  const expUp = consensus.expectedUpside ?? 0
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+        <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Escenario de Precios Objetivo</h2>
+        <div className="flex items-center gap-2">
+          {consensus.rating && <RatingBadge rating={consensus.rating} />}
+          <span className="text-[10px] text-gray-500 font-mono">
+            {consensus.count > 0 ? `${consensus.count} analistas` : "cobertura n/d"}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex gap-4 mb-5">
+        {bear && <ScenarioColumn s={bear} accent="bg-red-600" />}
+        {consensus.base && <ScenarioColumn s={consensus.base} accent="bg-blue-500" />}
+        {bull && <ScenarioColumn s={bull} accent="bg-green-600" />}
+      </div>
+
+      {/* Track: rango de objetivos con el precio actual y el valor esperado marcados */}
+      {span > 0 && (
+        <div className="mb-4">
+          <div className="relative h-8">
+            <div className="absolute top-3 left-0 right-0 h-1.5 rounded-full bg-gradient-to-r from-red-900/70 via-gray-700 to-green-900/70" />
+            {consensus.expectedPrice !== null && (
+              <div
+                className="absolute top-1.5 -translate-x-1/2 w-0.5 h-4 bg-amber-400"
+                style={{ left: `${posOf(consensus.expectedPrice)}%` }}
+                title={`Esperado $${consensus.expectedPrice.toFixed(2)}`}
+              />
+            )}
+            <div
+              className="absolute top-1 -translate-x-1/2 w-3 h-3 rounded-full bg-white border-2 border-gray-900 shadow"
+              style={{ left: `${posOf(currentPrice)}%` }}
+              title={`Precio actual $${currentPrice.toFixed(2)}`}
+            />
+          </div>
+          <div className="flex justify-between text-[10px] font-mono text-gray-600">
+            <span>${lo.toFixed(2)}</span>
+            <span className="text-gray-400">
+              <span className="text-white">●</span> actual ${currentPrice.toFixed(2)}
+              <span className="text-amber-400 ml-2">│</span> esperado ${(consensus.expectedPrice ?? 0).toFixed(2)}
+            </span>
+            <span>${hi.toFixed(2)}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3 border-t border-gray-800">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-600">Valor esperado</div>
+          <div className={`font-mono text-sm font-bold ${expUp >= 0 ? "text-green-400" : "text-red-400"}`}>
+            ${(consensus.expectedPrice ?? 0).toFixed(2)} ({expUp >= 0 ? "+" : ""}{expUp.toFixed(1)}%)
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-600">Dispersión</div>
+          <div className={`font-mono text-sm font-bold ${dispColor}`}>
+            {consensus.dispersion !== null ? `${consensus.dispersion.toFixed(0)}% · ${consensus.dispersionLabel}` : "—"}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-600">Confianza</div>
+          <div className={`font-mono text-sm font-bold ${confColor}`}>{consensus.confidence}/100</div>
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-500 mt-3 leading-relaxed">{consensus.tesis}</p>
+    </div>
+  )
+}
+
 // ─── Gráfica de precio histórico ────────────────────────────────────────────
 
 type ChartRange = "1mo" | "3mo" | "6mo" | "1y"
@@ -72,10 +202,10 @@ function calcMA(candles: { close: number; time: string }[], period: number) {
 
 function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: number }) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const chartRef     = useRef<any>(null)
-  const seriesRef    = useRef<any>(null)
-  const ma50Ref      = useRef<any>(null)
-  const ma200Ref     = useRef<any>(null)
+  const chartRef     = useRef<IChartApi | null>(null)
+  const seriesRef    = useRef<ISeriesApi<"Candlestick"> | null>(null)
+  const ma50Ref      = useRef<ISeriesApi<"Line"> | null>(null)
+  const ma200Ref     = useRef<ISeriesApi<"Line"> | null>(null)
   const [range,   setRange]   = useState<ChartRange>("3mo")
   const [loading, setLoading] = useState(true)
   const [ready,   setReady]   = useState(false)
@@ -130,10 +260,18 @@ function PriceChart({ symbol, grahamNumber }: { symbol: string; grahamNumber: nu
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reactiva el spinner durante el render al cambiar símbolo o rango
+  // (patrón "prev state" — evita setState síncrono dentro del efecto)
+  const dataKey = `${symbol}|${range}`
+  const [prevDataKey, setPrevDataKey] = useState(dataKey)
+  if (prevDataKey !== dataKey) {
+    setPrevDataKey(dataKey)
+    setLoading(true)
+  }
+
   useEffect(() => {
     if (!ready) return
     let cancelled = false
-    setLoading(true)
     fetch(`/api/chart?ticker=${symbol}&range=${range}`)
       .then(r => r.ok ? r.json() : null)
       .then(json => {
@@ -200,9 +338,17 @@ function ForecastSection({ symbol }: { symbol: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState("")
 
+  // Reinicia carga/error durante el render al cambiar el símbolo
+  // (patrón "prev state" — evita setState síncrono dentro del efecto)
+  const [prevSymbol, setPrevSymbol] = useState(symbol)
+  if (prevSymbol !== symbol) {
+    setPrevSymbol(symbol)
+    setLoading(true)
+    setError("")
+  }
+
   useEffect(() => {
     let cancelled = false
-    setLoading(true); setError("")
     fetch(`/api/forecast?symbol=${symbol}&steps=30`)
       .then(async r => {
         const j = await r.json()
@@ -281,6 +427,9 @@ export default function EmpresaPage() {
   const [inWatch, setInWatch]         = useState(false)
   const [actionDone, setActionDone]   = useState<string | null>(null)
   const [fetchedAt,  setFetchedAt]    = useState<string | null>(null)
+  // Reloj de referencia para diferencias temporales: se fija en los callbacks
+  // de fetch (donde Date.now() está permitido), nunca durante el render.
+  const [ahora,      setAhora]        = useState<number | null>(null)
   const [news,       setNews]         = useState<{ title: string; publisher: string; link: string; publishedAt: string }[]>([])
   const [ivData,     setIvData]       = useState<{ atmIv: number; ivRank: number | null; ivPercentile: number | null; samples: number } | null>(null)
 
@@ -289,14 +438,21 @@ export default function EmpresaPage() {
     isWatching(symbol).then(setInWatch)
   }, [symbol])
 
-  useEffect(() => {
-    const controller = new AbortController()
+  // Reinicia carga/error durante el render al cambiar el símbolo
+  // (patrón "prev state" — evita setState síncrono dentro del efecto)
+  const [prevSymbol, setPrevSymbol] = useState(symbol)
+  if (prevSymbol !== symbol) {
+    setPrevSymbol(symbol)
     setLoading(true)
     setError(false)
+  }
+
+  useEffect(() => {
+    const controller = new AbortController()
     // Fetch noticias en paralelo (no bloquea la carga principal)
     fetch(`/api/news/${symbol}`, { signal: controller.signal })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.items) setNews(d.items) })
+      .then(d => { if (d?.items) { setNews(d.items); setAhora(Date.now()) } })
       .catch(() => {})
 
     Promise.all([
@@ -306,6 +462,7 @@ export default function EmpresaPage() {
       .then(([raw, macroData]: [StockData & { fetchedAt?: string }, unknown]) => {
         const { fetchedAt: fa, ...d } = raw as StockData & { fetchedAt?: string }
         setFetchedAt(fa ?? null)
+        setAhora(Date.now())
         const score   = scoreStock(d as StockData)
         const forward = analyzeForward(d)
         let macro: MacroContext | undefined
@@ -327,6 +484,25 @@ export default function EmpresaPage() {
       .then(d => { if (d?.atmIv) setIvData(d) })
       .catch(e => console.error('[IV] fetch failed:', e))
   }, [symbol])
+
+  // Diferencias temporales calculadas una sola vez por carga de datos: el
+  // reloj `ahora` viene de estado (fijado en los callbacks de fetch), así el
+  // memo es puro y se recalcula cuando llegan datos/noticias nuevos.
+  const tiempos = useMemo(() => ({
+    diasAEarnings: data?.earningsDate && ahora
+      ? Math.round((new Date(data.earningsDate).getTime() - ahora) / 86400000)
+      : null,
+    minsDatos: fetchedAt && ahora
+      ? Math.round((ahora - new Date(fetchedAt).getTime()) / 60000)
+      : null,
+    edadNoticias: news.map(n => {
+      if (!ahora) return ""
+      const mins = Math.round((ahora - new Date(n.publishedAt).getTime()) / 60000)
+      return mins < 60 ? `hace ${mins}m` :
+             mins < 1440 ? `hace ${Math.round(mins / 60)}h` :
+             `hace ${Math.round(mins / 1440)}d`
+    }),
+  }), [data, fetchedAt, news, ahora])
 
   if (loading) return (
     <main className="min-h-screen bg-gray-950 text-gray-100 p-6 flex items-center justify-center">
@@ -367,17 +543,23 @@ export default function EmpresaPage() {
                   {data.dropFrom52w.toFixed(1)}%
                 </span>
               </div>
-              {data.analystTarget > 0 && (
+              {score.consensus.available && score.consensus.base && (
                 <div className="text-sm text-gray-400 mt-0.5">
-                  Target: ${data.analystTarget.toFixed(2)}
-                  <span className={`ml-2 font-bold ${data.upsideToTarget >= 20 ? "text-green-400" : "text-yellow-300"}`}>
-                    {pct(data.upsideToTarget)}
+                  Target: ${score.consensus.base.price.toFixed(2)}
+                  <span className={`ml-2 font-bold ${
+                    (score.consensus.expectedUpside ?? 0) >= 20 ? "text-green-400" :
+                    (score.consensus.expectedUpside ?? 0) >= 0  ? "text-yellow-300" : "text-red-400"
+                  }`}>
+                    {pct(score.consensus.expectedUpside ?? 0)}
                   </span>
+                  {score.consensus.rating && (
+                    <span className="ml-2 text-xs text-gray-500">{score.consensus.rating.label}</span>
+                  )}
                 </div>
               )}
               {data.earningsDate && (() => {
-                const days = Math.round((new Date(data.earningsDate).getTime() - Date.now()) / 86400000)
-                if (days >= -7 && days <= 45) return (
+                const days = tiempos.diasAEarnings
+                if (days != null && days >= -7 && days <= 45) return (
                   <div className={`inline-flex items-center gap-1.5 text-xs font-bold mt-1.5 px-2 py-0.5 rounded ${
                     days <= 7 ? "bg-amber-900/60 text-amber-300 border border-amber-700/50" :
                     "bg-gray-800 text-gray-400 border border-gray-700"
@@ -390,7 +572,7 @@ export default function EmpresaPage() {
                 return null
               })()}
               {fetchedAt && (() => {
-                const mins = Math.round((Date.now() - new Date(fetchedAt).getTime()) / 60000)
+                const mins = tiempos.minsDatos ?? 0
                 return (
                   <div className={`text-xs mt-1 ${mins > 10 ? "text-amber-400 font-semibold" : "text-gray-700"}`}>
                     {mins > 10 ? "⚠ " : ""}Datos de hace {mins} min
@@ -644,6 +826,9 @@ export default function EmpresaPage() {
           </div>
         </div>
 
+        {/* Escenario de precios objetivo — consenso de analistas */}
+        <ConsensusPanel consensus={score.consensus} currentPrice={data.currentPrice} />
+
         {/* Métricas clave */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
@@ -692,10 +877,7 @@ export default function EmpresaPage() {
             <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Noticias recientes</h2>
             <div className="space-y-3">
               {news.map((n, i) => {
-                const mins = Math.round((Date.now() - new Date(n.publishedAt).getTime()) / 60000)
-                const age  = mins < 60 ? `hace ${mins}m` :
-                             mins < 1440 ? `hace ${Math.round(mins / 60)}h` :
-                             `hace ${Math.round(mins / 1440)}d`
+                const age = tiempos.edadNoticias[i] ?? ""
                 return (
                   <a key={i} href={n.link} target="_blank" rel="noopener noreferrer"
                     className="flex items-start gap-3 group hover:bg-gray-800/50 rounded-lg p-2 -mx-2 transition-colors">

@@ -65,12 +65,25 @@ const ROWS: { label: string; render: (s: Scored) => ReactNode; best?: "high" | "
   },
   {
     label: "Upside",
+    render: s => {
+      const up = s.score.consensus.expectedUpside ?? 0
+      return (
+        <span className={`font-mono font-bold ${up >= 20 ? "text-green-400" : up >= 0 ? "text-yellow-300" : "text-red-400"}`}>
+          {s.score.consensus.available ? pct(up) : "—"}
+        </span>
+      )
+    },
+    best: "high",
+  },
+  {
+    label: "Consenso",
     render: s => (
-      <span className={`font-mono font-bold ${s.upsideToTarget >= 20 ? "text-green-400" : s.upsideToTarget >= 0 ? "text-yellow-300" : "text-red-400"}`}>
-        {pct(s.upsideToTarget)}
+      <span className="font-mono text-xs">
+        {s.score.consensus.rating
+          ? `${s.score.consensus.rating.label} (${s.score.consensus.count})`
+          : <span className="text-gray-600">—</span>}
       </span>
     ),
-    best: "high",
   },
   { label: "P/E",   render: s => <span className="font-mono">{fmt(s.pe)}</span>, best: "low" },
   { label: "ROE",   render: s => <span className="font-mono">{s.roe ? pct(s.roe * 100) : "—"}</span>, best: "high" },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import { useState, useEffect, useRef, useSyncExternalStore, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Metodologia1 from "@/components/Metodologia1";
 import Metodologia2 from "@/components/Metodologia2";
@@ -63,6 +63,37 @@ const METHODOLOGY_INTROS: Record<Tab, { what: string; how: string; output: strin
 
 interface SearchResult { symbol: string; name: string; exchange: string; type: string; }
 
+// ── Último análisis guardado (localStorage) ───────────────────────────────────
+// Snapshot seguro para SSR vía useSyncExternalStore: el servidor ve el
+// centinela `undefined` (getServerSnapshot) y el cliente el valor real tras
+// hidratar — sustituto canónico del patrón "mounted", sin hydration mismatch.
+
+type SavedGex = { ticker?: string; expiration?: string };
+
+const noopSubscribe = () => () => {};
+const getHydrated = () => true;
+const getHydratedServer = () => false;
+
+let savedGexCache: SavedGex | null | undefined;
+
+// La limpieza al desmontar fuerza una relectura de localStorage al remontar
+const subscribeSavedGex = () => () => { savedGexCache = undefined; };
+
+function readSavedGex(): SavedGex | null | undefined {
+  if (savedGexCache === undefined) {
+    try {
+      savedGexCache = JSON.parse(localStorage.getItem("wall_gex_last") ?? "null");
+    } catch {
+      savedGexCache = null;
+    }
+  }
+  return savedGexCache;
+}
+
+function readSavedGexServer(): SavedGex | null | undefined {
+  return undefined;
+}
+
 function GexContent() {
   const searchParams = useSearchParams();
   const urlTicker = searchParams.get("ticker")?.toUpperCase() ?? "";
@@ -76,12 +107,40 @@ function GexContent() {
   const [expiration, setExpiration] = useState("");
   const [expirations, setExpirations] = useState<string[]>([]);
   const [analyzeKey, setAnalyzeKey] = useState(0);
-  const [loadingExps, setLoadingExps] = useState(false);
+  // El auto-análisis arranca en el montaje, así que nace en true; el botón
+  // solo muestra el loader tras hidratar (ver `analyzing`) para no alterar
+  // el HTML del servidor.
+  const [loadingExps, setLoadingExps] = useState(true);
   const searchRef = useRef<HTMLDivElement>(null);
+
+  const hydrated = useSyncExternalStore(noopSubscribe, getHydrated, getHydratedServer);
+  const analyzing = loadingExps && hydrated;
+
+  // Restaura el último análisis guardado una sola vez, durante el render:
+  // en la hidratación el snapshot es `undefined` (coincide con el servidor)
+  // y justo después llega el valor real — sin setState síncrono en efectos.
+  const savedGex = useSyncExternalStore(subscribeSavedGex, readSavedGex, readSavedGexServer);
+  const [restored, setRestored] = useState(false);
+  if (!restored && savedGex !== undefined) {
+    setRestored(true);
+    if (!urlTicker && savedGex?.ticker) {
+      setTicker(savedGex.ticker);
+      setQuery(savedGex.ticker);
+      if (savedGex.expiration) setExpiration(savedGex.expiration);
+    }
+  }
+
+  // Limpia las sugerencias durante el render cuando el query queda vacío
+  // (patrón "prev state" — evita setState síncrono dentro del efecto)
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (prevQuery !== query) {
+    setPrevQuery(query);
+    if (query.length < 1) setSuggestions([]);
+  }
 
   // Debounced search
   useEffect(() => {
-    if (query.length < 1) { setSuggestions([]); return; }
+    if (query.length < 1) return;
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
@@ -112,16 +171,16 @@ function GexContent() {
     setShowSuggestions(false);
   }
 
-  async function handleAnalyze(overrideTicker?: string) {
-    const t = (overrideTicker ?? ticker).trim();
-    if (!t) return;
-    setLoadingExps(true);
+  // Parte asíncrona del análisis: no llama setState síncronamente (todo estado
+  // se toca tras el await), así el efecto de montaje puede invocarla directo.
+  // `curExp` llega como argumento para conservar el vencimiento vigente.
+  async function requestAnalyze(t: string, curExp: string) {
     try {
       const res = await fetch(`/api/expirations?ticker=${t}`);
       const json = await res.json();
       if (res.ok && json.expirations?.length > 0) {
         setExpirations(json.expirations);
-        const newExp = (!expiration || !json.expirations.includes(expiration)) ? json.expirations[0] : expiration;
+        const newExp = (!curExp || !json.expirations.includes(curExp)) ? json.expirations[0] : curExp;
         setExpiration(newExp);
         try { localStorage.setItem("wall_gex_last", JSON.stringify({ ticker: t, expiration: newExp })); } catch {}
       }
@@ -130,36 +189,41 @@ function GexContent() {
     setAnalyzeKey((k) => k + 1);
   }
 
-  // Auto-analyze al montar: URL ticker > localStorage > SPY por defecto
+  // Análisis manual (botón / Enter): enciende el loader él mismo
+  function handleAnalyze(overrideTicker?: string) {
+    const t = (overrideTicker ?? ticker).trim();
+    if (!t) return;
+    setLoadingExps(true);
+    requestAnalyze(t, expiration);
+  }
+
+  // Auto-analyze al montar: URL ticker > localStorage > SPY por defecto.
+  // La restauración del input ya ocurrió durante el render (ver arriba);
+  // aquí solo se dispara la petición, que no llama setState síncronamente.
   const autoAnalyzed = useRef(false);
   useEffect(() => {
     if (autoAnalyzed.current) return;
     autoAnalyzed.current = true;
-    if (urlTicker) {
-      handleAnalyze(urlTicker);
-    } else {
-      try {
-        const saved = JSON.parse(localStorage.getItem("wall_gex_last") ?? "null");
-        if (saved?.ticker) {
-          setTicker(saved.ticker);
-          setQuery(saved.ticker);
-          if (saved.expiration) setExpiration(saved.expiration);
-          handleAnalyze(saved.ticker);
-          return;
-        }
-      } catch {}
-      // Sin URL ni localStorage → SPY por defecto
-      handleAnalyze("SPY");
-    }
+    const saved = readSavedGex();
+    const target = urlTicker || saved?.ticker || "SPY";
+    requestAnalyze(target, "");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [introOpen, setIntroOpen] = useState(false);
   const [ivData, setIvData] = useState<{ atmIv: number; ivRank: number | null; ivPercentile: number | null; samples: number } | null>(null);
 
+  // Resetea el IV mostrado durante el render cuando cambia el análisis activo
+  // (patrón "prev state" — evita setState síncrono dentro del efecto)
+  const ivKey = `${analyzeKey}|${ticker}`;
+  const [prevIvKey, setPrevIvKey] = useState(ivKey);
+  if (prevIvKey !== ivKey) {
+    setPrevIvKey(ivKey);
+    if (analyzeKey > 0 && ticker) setIvData(null);
+  }
+
   useEffect(() => {
     if (analyzeKey === 0 || !ticker) return;
-    setIvData(null);
     fetch(`/api/iv?ticker=${ticker}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => d?.atmIv ? setIvData(d) : null)
@@ -211,10 +275,10 @@ function GexContent() {
             </div>
             <button
               onClick={() => { setShowSuggestions(false); handleAnalyze(); }}
-              disabled={loadingExps}
+              disabled={analyzing}
               className="bg-accent text-white px-5 py-2 text-sm font-bold tracking-widest hover:opacity-80 disabled:opacity-40 transition-opacity flex-1 sm:flex-none"
             >
-              {loadingExps ? "..." : "ANALIZAR"}
+              {analyzing ? "..." : "ANALIZAR"}
             </button>
           </div>
 

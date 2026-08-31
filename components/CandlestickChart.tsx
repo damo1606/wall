@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import {
   createChart,
   ColorType,
@@ -24,6 +24,18 @@ interface Props {
   spot: number;
 }
 
+// ── Tema oscuro como store externo (clase `dark` en <html>) ──────────────────
+// Suscripción vía useSyncExternalStore: evita el setState síncrono dentro de
+// un efecto (react-hooks/set-state-in-effect) manteniendo la misma reactividad.
+function subscribeIsDark(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributeFilter: ["class"] });
+  return () => observer.disconnect();
+}
+const getIsDark = () => document.documentElement.classList.contains("dark");
+// En SSR no hay DOM: mismo valor inicial que el estado anterior (false)
+const getIsDarkServer = () => false;
+
 const LEVELS = [
   { key: "callWall",   label: "CALL WALL",   color: "#e53935" },
   { key: "resistance", label: "RESISTANCE",  color: "#f97316" },
@@ -35,16 +47,7 @@ const LEVELS = [
 export default function CandlestickChart({ candles, levels, spot }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    setIsDark(document.documentElement.classList.contains("dark"));
-    const observer = new MutationObserver(() => {
-      setIsDark(document.documentElement.classList.contains("dark"));
-    });
-    observer.observe(document.documentElement, { attributeFilter: ["class"] });
-    return () => observer.disconnect();
-  }, []);
+  const isDark = useSyncExternalStore(subscribeIsDark, getIsDark, getIsDarkServer);
 
   useEffect(() => {
     if (!containerRef.current || candles.length === 0) return;
@@ -93,10 +96,6 @@ export default function CandlestickChart({ candles, levels, spot }: Props) {
     });
 
     candleSeries.setData(candles);
-
-    // Support / Resistance zones — shade between support and resistance
-    const upper = Math.max(levels.resistance, levels.callWall);
-    const lower = Math.min(levels.support, levels.putWall);
 
     // Add each key level as a dashed price line
     for (const lvl of LEVELS) {

@@ -1,7 +1,6 @@
 "use client"
 
-import { useState } from "react"
-import Link from "next/link"
+import { useState, useRef } from "react"
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS, RUSSELL2000_SYMBOLS, QUANTUM_SYMBOLS, BIOTECH_SMALL_SYMBOLS, TECH_SMALL_SYMBOLS, CONSUMER_SMALL_SYMBOLS } from "@/lib/symbols"
 import { analyzeForward } from "@/lib/forward"
 import type { StockData } from "@/lib/yahoo"
@@ -32,10 +31,6 @@ async function fetchStock(symbol: string): Promise<Analyzed | null> {
   } catch {
     return null
   }
-}
-
-function pct(v: number, dec = 1) {
-  return `${v >= 0 ? "+" : ""}${v.toFixed(dec)}%`
 }
 
 function GradeChip({ grade, size = "md" }: { grade: string; size?: "sm" | "md" }) {
@@ -93,7 +88,8 @@ export default function Prospectiva() {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [gradeFilter, setGradeFilter] = useState("C")
   const [stageFilter, setStageFilter] = useState("all")
-  const runningRef = { current: false }
+  // Ref real (persistente entre renders) para poder cortar el escaneo en curso
+  const runningRef = useRef(false)
 
   const universeSymbols = UNIVERSES.find(u => u.key === universe)?.symbols ?? DJIA_SYMBOLS
   const symbols = universe === "sp500" ? universeSymbols.slice(0, limit) : universeSymbols

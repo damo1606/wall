@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useSyncExternalStore } from "react"
 import type { Analysis7Result, SRCluster, TimingBlock, MethodologyContribution } from "@/lib/gex7"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -35,6 +35,12 @@ type ExpectationShiftData = { score: number; label: string; fedBias: string; bre
 type MacroResult = { macroScore: MacroScoreData; expectationShift: ExpectationShiftData; detection: { phase: string; confidence: number; signals: string[] }; vix: number | null; vix3m: number | null; equityPcr: number | null }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// ¿Ya se hidrató el cliente? — sustituto canónico del patrón "mounted":
+// el servidor ve false (getServerSnapshot) y el cliente true tras hidratar.
+const noopSubscribe = () => () => {}
+const getHydrated = () => true
+const getHydratedServer = () => false
 
 function fmt(n: number | null | undefined, d = 2) {
   if (n == null || isNaN(n)) return "—"
@@ -331,11 +337,15 @@ export default function GammaMapPage() {
   const [active, setActive]   = useState<Ticker>("SPY")
   const [lastUpdate, setLastUpdate] = useState("")
   const [macro, setMacro]     = useState<MacroResult | null>(null)
-  const [macroLoading, setMacroLoading] = useState(false)
+  // El fetch de macro arranca en el montaje, así que nace en true; el skeleton
+  // solo se muestra tras hidratar (ver macroBusy) para no alterar el HTML SSR.
+  const [macroLoading, setMacroLoading] = useState(true)
+  const hydrated = useSyncExternalStore(noopSubscribe, getHydrated, getHydratedServer)
+  const macroBusy = macroLoading && hydrated
 
-  function fetchTicker(t: Ticker) {
-    setLoading(prev => ({ ...prev, [t]: true }))
-    setErrors(prev => ({ ...prev, [t]: "" }))
+  // Parte asíncrona de los fetches: todos los setState viven en callbacks del
+  // promise, de modo que el efecto de montaje no llama setState síncronamente.
+  const requestTicker = useCallback((t: Ticker) => {
     fetch(`/api/analysis7?ticker=${t}`)
       .then(r => r.json())
       .then(d => {
@@ -345,23 +355,31 @@ export default function GammaMapPage() {
       })
       .catch(e => setErrors(prev => ({ ...prev, [t]: e.message })))
       .finally(() => setLoading(prev => ({ ...prev, [t]: false })))
-  }
+  }, [])
 
-  function fetchMacro() {
-    setMacroLoading(true)
+  const requestMacro = useCallback(() => {
     fetch("/api/macro")
       .then(r => r.json())
       .then(d => setMacro(d))
       .catch(() => null)
       .finally(() => setMacroLoading(false))
-  }
+  }, [])
 
+  // Refresco manual: repone indicadores de carga y errores antes de refetchear
   function refreshAll() {
-    TICKERS.forEach(fetchTicker)
-    fetchMacro()
+    setLoading({ SPY: true, QQQ: true })
+    setErrors({ SPY: "", QQQ: "" })
+    setMacroLoading(true)
+    TICKERS.forEach(requestTicker)
+    requestMacro()
   }
 
-  useEffect(() => { refreshAll() }, [])
+  // Carga inicial: los estados de carga ya nacen en true, no hace falta
+  // setState síncrono dentro del efecto (deps estables → corre una sola vez).
+  useEffect(() => {
+    TICKERS.forEach(requestTicker)
+    requestMacro()
+  }, [requestTicker, requestMacro])
 
   const d         = data[active]
   const isLoading = loading[active]
@@ -808,15 +826,15 @@ export default function GammaMapPage() {
           })()}
 
           {/* Macro Score */}
-          {(macro || macroLoading) && (
+          {(macro || macroBusy) && (
             <div className="border border-border bg-card rounded-lg p-4">
               <p className="text-xs text-muted tracking-widest mb-3">MACRO SCORE — ENTORNO ECONÓMICO</p>
 
-              {macroLoading && (
+              {macroBusy && (
                 <div className="space-y-2"><Skeleton /><Skeleton w="w-3/4" /></div>
               )}
 
-              {macro && !macroLoading && (() => {
+              {macro && !macroBusy && (() => {
                 const ms = macro.macroScore
                 const es = macro.expectationShift
                 const det = macro.detection

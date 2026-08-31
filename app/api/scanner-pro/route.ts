@@ -3,6 +3,7 @@ import { getCrumb, fetchStockData } from "@/lib/yahoo";
 import { supabaseServer } from "@/lib/supabase";
 import type { StockData } from "@/lib/yahoo";
 import type { ScoreBreakdown } from "@/lib/scoring";
+import { buildAnalystConsensus } from "@/lib/analyst-consensus";
 
 // Sin esto Next.js trata el GET como static/cacheable y, cuando el cron snapshot
 // lo llama internamente, recibe una versión cacheada antigua (~5 filas) en vez
@@ -23,6 +24,9 @@ import { computeAnalysis7 } from "@/lib/gex7";
 import { computeAnalysis8, type ExpData8 } from "@/lib/gex8";
 import type { ExpData } from "@/lib/gex3";
 import type { Analysis6Result } from "@/lib/gex6";
+import { requireAuth } from "@/lib/api-auth"
+import { strictIntParam } from "@/lib/query-params"
+import { computeSORE, HARD_EVENT_ITEMS } from "@/lib/sore"
 
 // ── Yahoo Finance helpers ─────────────────────────────────────────────────────
 
@@ -73,15 +77,28 @@ async function fetchHistory(
   return { current: valid[valid.length - 1] ?? 0, history: valid };
 }
 
-function extractRaw(opts: any) {
+// Contrato crudo de la cadena de Yahoo — solo los campos que consumimos.
+type YahooRawOption = {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+  volume?: number;
+};
+
+type YahooOptionsData = {
+  calls?: YahooRawOption[];
+  puts?: YahooRawOption[];
+};
+
+function extractRaw(opts: YahooOptionsData) {
   return {
-    calls: (opts?.calls ?? []).map((c: any) => ({
+    calls: (opts?.calls ?? []).map((c) => ({
       strike: c.strike ?? 0,
       impliedVolatility: c.impliedVolatility ?? 0,
       openInterest: c.openInterest ?? 0,
       volume: c.volume ?? 0,
     })),
-    puts: (opts?.puts ?? []).map((p: any) => ({
+    puts: (opts?.puts ?? []).map((p) => ({
       strike: p.strike ?? 0,
       impliedVolatility: p.impliedVolatility ?? 0,
       openInterest: p.openInterest ?? 0,
@@ -123,10 +140,10 @@ async function fetchMarketRegime(cookie: string, crumb: string): Promise<Analysi
   const expTs: number = spyResult.expirationDates?.[0] ?? 0;
   const T = Math.max((new Date(expTs * 1000).getTime() - today.getTime()) / (365 * 24 * 60 * 60 * 1000), 0.001);
 
-  const spyCalls = (spyOptData.calls ?? []).map((c: any) => ({
+  const spyCalls = (spyOptData.calls ?? []).map((c: YahooRawOption) => ({
     strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0, openInterest: c.openInterest ?? 0,
   }));
-  const spyPuts = (spyOptData.puts ?? []).map((p: any) => ({
+  const spyPuts = (spyOptData.puts ?? []).map((p: YahooRawOption) => ({
     strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0, openInterest: p.openInterest ?? 0,
   }));
 
@@ -245,110 +262,6 @@ function toVerdict(score: number): ConvictionRow["verdict"] {
   return "NEUTRAL";
 }
 
-// M1: items 8-K que fuerzan AVOID (vol explosion / tail / earnings / M&A / dilución).
-// El resto de items persistidos (5.02 exec, 5.07 voto, 7.01 Reg FD, 8.01 catch-all)
-// son rutinarios → capan el gate a WAIT en vez de bloquear todo.
-const HARD_EVENT_ITEMS = new Set([
-  "1.03", "2.04", "3.01", "4.02", "2.06", "2.05", "2.02", "5.01", "1.01", "2.01", "3.02", "1.05",
-])
-
-function computeSORE(
-  m1NetGex: number,
-  m1Pressure: number,
-  m1Pcr: number,
-  m6Vix: number,
-  m6FearScore: number,
-  m6Regime: string,
-  m6Suspended: boolean,
-  m5Score: number,
-  // EDGAR F1/F2: opcionales — si vienen null, default neutral (no afectan)
-  insiderSignal?: number | null,     // -1..+1 (net flow USD vs market cap, squashed tanh)
-  shortRatioFloat?: number | null,   // 0..1 (shares short / float)
-  // M1: 8-K rutinario (no distress) → capa el gate a WAIT (no permite GO), sin forzar AVOID
-  eventSoftCap?: boolean,
-): { css: number; dss: number; vss: number; vrp: number; strategy: string; gate: "GO" | "WAIT" | "AVOID" } {
-  // DSS: Dealer Stabilization Score
-  // GEX > 0 = dealers long gamma = buy dips / sell rips = stabilizing
-  const gexScore = m1NetGex > 0
-    ? Math.min(100, 50 + (m1NetGex / 1e9) * 25)
-    : Math.max(0, 50 + (m1NetGex / 1e9) * 15)
-  const pressScore = Math.min(100, Math.max(0, (m1Pressure + 100) / 2))
-  // PCR > 0.8: dealers sold puts = long delta = support bids under market
-  const pcrScore = m1Pcr > 1.2 ? 70 : m1Pcr > 0.8 ? 55 : m1Pcr > 0.5 ? 40 : 25
-  // F1: insider net flow del ticker. Selling fuerte = score bajo = DSS cae.
-  const insiderScore = insiderSignal == null ? 50 : Math.round((insiderSignal + 1) * 50)
-  const dss = Math.round(0.35 * gexScore + 0.30 * pressScore + 0.20 * pcrScore + 0.15 * insiderScore)
-
-  // VSS: Volatility Suppression Score
-  // fearScore 30–55 = elevated IV without panic = ideal premium selling window
-  const ivScore =
-    m6FearScore < 20 ? 15
-    : m6FearScore < 35 ? 78
-    : m6FearScore < 55 ? 65
-    : m6FearScore < 70 ? 45
-    : 25
-  const regimeScore =
-    m6Regime === "COMPRESIÓN" ? 90
-    : m6Regime === "TRANSICIÓN" ? 65
-    : m6Regime === "EXPANSIÓN" ? 35
-    : m6Regime === "PÁNICO AGUDO" ? 10
-    : m6Regime === "CRISIS SISTÉMICA" ? 5
-    : 50
-  // M5 near-neutral = range-bound = theta decay accelerates
-  const m5ConfScore = Math.abs(m5Score) < 30 ? 70 : Math.abs(m5Score) < 60 ? 50 : 28
-  const vss = Math.round(0.40 * ivScore + 0.40 * regimeScore + 0.20 * m5ConfScore)
-
-  // VRP: Vol Risk Premium proxy — VIX historically trades ~3-5pts above 20d RV
-  // VIX 12 = floor (VRP ≈ 0), VIX 37 = 100
-  let vrp = Math.round(Math.min(100, Math.max(0, (m6Vix - 12) * 4)))
-  // F2: si SI/float > 15%, el VRP per-ticker no es vendible (squeeze risk).
-  if (shortRatioFloat != null && shortRatioFloat > 0.15) {
-    vrp = Math.min(vrp, 30)
-  }
-
-  // CSS: Composite Suppression Signal
-  const css = Math.round(0.35 * dss + 0.35 * vss + 0.30 * vrp)
-
-  // Hard blocks
-  if (m6Suspended || m6Regime === "PÁNICO AGUDO" || m6Regime === "CRISIS SISTÉMICA" || css < 45) {
-    return { css, dss, vss, vrp, strategy: "AVOID", gate: "AVOID" }
-  }
-
-  let strategy: string
-  let gate: "GO" | "WAIT" | "AVOID"
-
-  // F1+F2 ban de naked sells (SHORT STRANGLE): short interest > 20% del float
-  // o insider selling fuerte → forzar a defined risk (IRON CONDOR).
-  const banNakedSells = (shortRatioFloat != null && shortRatioFloat > 0.20)
-                     || (insiderSignal != null && insiderSignal < -0.7)
-
-  if (css >= 75 && dss >= 65) {
-    gate = "GO"
-    if (banNakedSells) {
-      strategy = "IRON CONDOR"  // defined risk forzado por short interest / insider selling
-    } else if (m6Regime === "COMPRESIÓN" && m6FearScore < 60) {
-      strategy = m1Pcr > 0.9 ? "SHORT STRANGLE" : "IRON CONDOR"
-    } else if (m6FearScore < 40) {
-      strategy = "CALENDAR"
-    } else {
-      strategy = "IRON CONDOR"
-    }
-  } else if (css >= 55) {
-    gate = "WAIT"
-    strategy = m6Regime === "COMPRESIÓN" ? "CREDIT SPREAD" : "BWB"
-  } else {
-    gate = "WAIT"
-    strategy = "CREDIT SPREAD"
-  }
-
-  // M1: un 8-K rutinario (5.02/5.07/7.01/8.01) no fuerza AVOID, pero impide GO (capa a WAIT).
-  if (eventSoftCap && gate === "GO") {
-    gate = "WAIT"
-    strategy = m6Regime === "COMPRESIÓN" ? "CREDIT SPREAD" : "BWB"
-  }
-
-  return { css, dss, vss, vrp, strategy, gate }
-}
 
 // ── Per-ticker analysis ───────────────────────────────────────────────────────
 
@@ -453,10 +366,19 @@ async function pool<T, R>(items: T[], concurrency: number, fn: (item: T) => Prom
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const { searchParams } = request.nextUrl;
   const universe    = searchParams.get("universe") ?? "sp500";
-  const limit       = Math.min(parseInt(searchParams.get("limit") ?? "20"), 100);
-  const minBuyScore = parseInt(searchParams.get("minBuyScore") ?? "50");
+  // Un parámetro inválido devolvía 200 con cero filas, indistinguible de "hoy no
+  // hay oportunidades". Ahora se responde 400 en vez de callar.
+  const limit       = strictIntParam(searchParams.get("limit"),       { def: 20, min: 1, max: 100 });
+  const minBuyScore = strictIntParam(searchParams.get("minBuyScore"), { def: 50, min: 0, max: 100 });
+  if (limit === null || minBuyScore === null) {
+    return NextResponse.json(
+      { error: "Parámetros inválidos: 'limit' y 'minBuyScore' deben ser enteros" },
+      { status: 400 }
+    );
+  }
 
   // 1. Fetch fundamental screener (directo, sin HTTP interno)
   const symbols = (
@@ -496,7 +418,26 @@ export async function GET(request: NextRequest) {
     for (const r of scoreRows ?? []) {
       if (latestBySymbol.has(r.symbol_id)) continue
       const c = r.components as unknown as { stock?: StockData; score?: ScoreBreakdown } | null
-      if (c?.stock && c?.score) latestBySymbol.set(r.symbol_id, { symbolId: r.symbol_id, stock: c.stock, score: c.score })
+      if (c?.stock && c?.score) {
+        // Las filas escritas antes del consenso de analistas no traen
+        // `score.consensus`, y leerlo a ciegas rompería el endpoint hasta que el
+        // cron repueble. Se reconstruye con lo que haya en el blob: si el `stock`
+        // cacheado tampoco tiene el rango ni el rating, el escenario degrada
+        // solo a la rama base sobre la media, que es lo que esa fila sabe.
+        const score = c.score.consensus
+          ? c.score
+          : { ...c.score, consensus: buildAnalystConsensus({
+              currentPrice:       c.stock.currentPrice ?? 0,
+              targetMean:         (c.stock.analystTarget ?? 0) > 0 ? c.stock.analystTarget : null,
+              targetMedian:       c.stock.analystTargetMedian ?? null,
+              targetHigh:         c.stock.analystTargetHigh   ?? null,
+              targetLow:          c.stock.analystTargetLow    ?? null,
+              analystCount:       c.stock.analystCount ?? 0,
+              recommendationMean: c.stock.recommendationMean  ?? null,
+              recommendationKey:  c.stock.recommendationKey   ?? null,
+            }) }
+        latestBySymbol.set(r.symbol_id, { symbolId: r.symbol_id, stock: c.stock, score })
+      }
     }
     scored = [...latestBySymbol.values()]
       .filter(({ score }) => score.buyScore >= minBuyScore)
@@ -533,8 +474,8 @@ export async function GET(request: NextRequest) {
   let m6: Analysis6Result;
   try {
     m6 = await getCachedM6(cookie, crumb);
-  } catch (e: any) {
-    return NextResponse.json({ error: `Régimen M6: ${e.message}` }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: `Régimen M6: ${e instanceof Error ? e.message : String(e)}` }, { status: 500 });
   }
 
   // 4b. EDGAR F1+F2+F3: bulk queries de insider_flows, short_interest y
@@ -623,7 +564,7 @@ export async function GET(request: NextRequest) {
           );
 
           const m2PressureMax = m2.filteredStrikes.length > 0
-            ? Math.max(...m2.filteredStrikes.map((s: any) => s.institutionalPressure))
+            ? Math.max(...m2.filteredStrikes.map((s) => s.institutionalPressure))
             : 0;
 
           const conviction = calcConviction(score.buyScore, m7.finalScore, true);
@@ -638,14 +579,19 @@ export async function GET(request: NextRequest) {
           // insuficientes), force AVOID por el mismo codepath. No vender prima en
           // opciones que luego no se pueden cerrar. Aditivo — no toca la matemática SORE.
           const blockedByLiquidity = !m8.tradeable
-          const sore = computeSORE(
-            m1.netGex, m1.institutionalPressure, m1.putCallRatio,
-            m6.vix, m6.fearScore, m6.regime,
-            m6.signalSuspended || blockedByEvent || blockedByLiquidity,
-            m5.score,
-            insiderSignal, shortRatioFloat,
-            softEvent,
-          );
+          const sore = computeSORE({
+            m1NetGex:    m1.netGex,
+            m1Pressure:  m1.institutionalPressure,
+            m1Pcr:       m1.putCallRatio,
+            m6Vix:       m6.vix,
+            m6FearScore: m6.fearScore,
+            m6Regime:    m6.regime,
+            m6Suspended: m6.signalSuspended || blockedByEvent || blockedByLiquidity,
+            m5Score:     m5.score,
+            insiderSignal,
+            shortRatioFloat,
+            eventSoftCap: softEvent,
+          });
 
           return {
             symbol: stock.symbol,
@@ -657,7 +603,7 @@ export async function GET(request: NextRequest) {
             dropFrom52w: stock.dropFrom52w ?? 0,
             grahamNumber: stock.grahamNumber ?? 0,
             discountToGraham: stock.discountToGraham ?? 0,
-            upsideToTarget: stock.upsideToTarget ?? 0,
+            upsideToTarget: score.consensus.expectedUpside ?? 0,
             pe: stock.pe ?? 0,
             roe: stock.roe ?? 0,
             m1Pressure: m1.institutionalPressure,
@@ -670,7 +616,7 @@ export async function GET(request: NextRequest) {
             m2Support: m2.support,
             m2Resistance: m2.resistance,
             m3Confluence: m3.filteredStrikes.length > 0
-              ? parseFloat(Math.max(...m3.filteredStrikes.map((s: any) => Math.abs(s.confluenceScore))).toFixed(2))
+              ? parseFloat(Math.max(...m3.filteredStrikes.map((s) => Math.abs(s.confluenceScore))).toFixed(2))
               : 0,
             m3SupportConf: m3.supportConfidence ?? 0,
             m3ResistanceConf: m3.resistanceConfidence ?? 0,
@@ -728,7 +674,7 @@ export async function GET(request: NextRequest) {
             dropFrom52w: stock.dropFrom52w ?? 0,
             grahamNumber: stock.grahamNumber ?? 0,
             discountToGraham: stock.discountToGraham ?? 0,
-            upsideToTarget: stock.upsideToTarget ?? 0,
+            upsideToTarget: score.consensus.expectedUpside ?? 0,
             pe: stock.pe ?? 0,
             roe: stock.roe ?? 0,
             m1Pressure: 0, m1Support: 0, m1Resistance: 0,

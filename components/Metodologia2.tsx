@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Analysis2Result } from "@/types";
 import CandlestickChart from "@/components/CandlestickChart";
 import {
@@ -48,17 +48,24 @@ export default function Metodologia2({
   const [error, setError] = useState("");
 
   const fetchAnalysis = useCallback(async (t: string, exp: string) => {
-    setLoading(true);
-    setError("");
     try {
       const url = exp
         ? `/api/analysis2?ticker=${t}&expiration=${exp}`
         : `/api/analysis2?ticker=${t}`;
 
-      const [analysisRes, chartRes] = await Promise.all([
+      // Lanza ambas peticiones de inmediato para conservar el timing de red
+      const responses = Promise.all([
         fetch(url),
         fetch(`/api/chart?ticker=${t}&range=5mo`),
       ]);
+
+      // Tras el primer await, estos setState ya no se ejecutan de forma
+      // síncrona dentro del cuerpo del efecto que invoca esta función
+      await Promise.resolve();
+      setLoading(true);
+      setError("");
+
+      const [analysisRes, chartRes] = await responses;
 
       const analysisJson = await analysisRes.json();
       if (!analysisRes.ok) throw new Error(analysisJson.error ?? "Error");
@@ -66,18 +73,24 @@ export default function Metodologia2({
       const chartJson = await chartRes.json();
       setData(analysisJson);
       setCandles(chartJson.candles ?? []);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Se dispara solo cuando el usuario pulsa Analizar (cambia analyzeKey), pero
+  // leyendo el ticker y la expiración VIGENTES. Con `[analyzeKey]` como única
+  // dependencia el efecto arrastraba los valores capturados en un render
+  // anterior y podía pintar el análisis de otro ticker.
+  const ultimaClave = useRef(0);
   useEffect(() => {
-    if (analyzeKey > 0 && ticker) {
-      fetchAnalysis(ticker, expiration);
-    }
-  }, [analyzeKey]);
+    if (analyzeKey === 0 || !ticker || ultimaClave.current === analyzeKey) return;
+    ultimaClave.current = analyzeKey;
+    fetchAnalysis(ticker, expiration);
+  }, [analyzeKey, ticker, expiration, fetchAnalysis]);
 
   const candleLevels = data
     ? {

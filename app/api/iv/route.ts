@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCrumb } from "@/lib/yahoo"
 import { readSnapshotHistory, recordDailySnapshot, SNAPSHOT_IV } from "@/lib/snapshots"
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -8,6 +9,9 @@ const HEADERS = {
   "Accept-Language": "en-US,en;q=0.9",
   Referer: "https://finance.yahoo.com/",
 }
+
+// Campos que usamos de cada contrato de la cadena de Yahoo.
+type YahooRawOption = { strike?: number; impliedVolatility?: number }
 
 function calcAtmIv(
   calls: { strike: number; impliedVolatility: number }[],
@@ -37,6 +41,7 @@ function ivPercentile(current: number, history: number[]): number | null {
 }
 
 export async function GET(request: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const ticker = request.nextUrl.searchParams.get("ticker")?.toUpperCase()
   if (!ticker) return NextResponse.json({ error: "ticker required" }, { status: 400 })
 
@@ -54,8 +59,8 @@ export async function GET(request: NextRequest) {
     const optData = result?.options?.[0]
     if (!optData || !spot) return NextResponse.json({ error: "No chain" }, { status: 404 })
 
-    const calls = (optData.calls ?? []).map((c: any) => ({ strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0 }))
-    const puts  = (optData.puts  ?? []).map((p: any) => ({ strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0 }))
+    const calls = (optData.calls ?? []).map((c: YahooRawOption) => ({ strike: c.strike ?? 0, impliedVolatility: c.impliedVolatility ?? 0 }))
+    const puts  = (optData.puts  ?? []).map((p: YahooRawOption) => ({ strike: p.strike ?? 0, impliedVolatility: p.impliedVolatility ?? 0 }))
     const atmIv = calcAtmIv(calls, puts, spot)
 
     // Historial de IV ATM en methodology_snapshots (una fila por ticker/día UTC).
@@ -74,7 +79,7 @@ export async function GET(request: NextRequest) {
       ivPercentile: ivPercentile(atmIv, history),
       samples:      history.length,
     })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 })
   }
 }

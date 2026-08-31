@@ -294,8 +294,8 @@ export default function RotacionPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Error al obtener datos");
       setData(json);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al obtener datos");
     }
     setLoading(false);
   }, []);

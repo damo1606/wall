@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCrumb } from "@/lib/yahoo"
+import { requireAuth } from "@/lib/api-auth"
+import { intParam } from "@/lib/query-params"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -63,10 +65,11 @@ function normalCdf(x: number): number {
 }
 
 export async function GET(req: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const { searchParams } = req.nextUrl
-  const cssThreshold = parseInt(searchParams.get("threshold") ?? "75")   // proxy: VIX percentile threshold
-  const horizonDays  = parseInt(searchParams.get("horizon") ?? "30")
-  const rollingWin   = parseInt(searchParams.get("rolling") ?? "252")    // ventana de percentile
+  const cssThreshold = intParam(searchParams.get("threshold"), { def: 75,  min: 0,  max: 100 })   // proxy: VIX percentile threshold
+  const horizonDays  = intParam(searchParams.get("horizon"),   { def: 30,  min: 1,  max: 365 })
+  const rollingWin   = intParam(searchParams.get("rolling"),   { def: 252, min: 20, max: 2000 })  // ventana de percentile
 
   const auth = await getCrumb()
   if (!auth) return NextResponse.json({ error: "Yahoo auth failed" }, { status: 503 })

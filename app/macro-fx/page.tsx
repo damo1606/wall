@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useSyncExternalStore } from 'react'
 import type { Currency, MacroIndicator, MacroInput, COTData, CurrencyScore, PairScore, PairForecast, PairMarkov } from '@/types/forex'
 import { emptyInputs } from '@/lib/forex'
 import { KPIPills } from '@/components/MacroFX/KPIPills'
@@ -41,6 +41,29 @@ function saveToStorage(inputs: MacroInput, cotData: COTData) {
   } catch {}
 }
 
+// ── Estado guardado (localStorage) ────────────────────────────────────────────
+// Snapshot seguro para SSR vía useSyncExternalStore: el servidor ve el
+// centinela `undefined` (getServerSnapshot) y el cliente el valor real tras
+// hidratar — sustituto canónico del patrón "mounted", sin hydration mismatch.
+
+type SavedMacroFx = { inputs: MacroInput; cotData: COTData }
+
+let savedMacroFxCache: SavedMacroFx | null | undefined
+
+// La limpieza al desmontar fuerza una relectura de localStorage al remontar
+const subscribeSavedMacroFx = () => () => { savedMacroFxCache = undefined }
+
+function readSavedMacroFx(): SavedMacroFx | null | undefined {
+  if (savedMacroFxCache === undefined) {
+    savedMacroFxCache = loadFromStorage()
+  }
+  return savedMacroFxCache
+}
+
+function readSavedMacroFxServer(): SavedMacroFx | null | undefined {
+  return undefined
+}
+
 function mergeFred(inputs: MacroInput, fred: FredActuals): MacroInput {
   const result = { ...inputs } as MacroInput
   for (const [c, indicators] of Object.entries(fred)) {
@@ -67,13 +90,20 @@ export default function MacroFXPage() {
   const [fredActuals, setFredActuals] = useState<FredActuals>({})
   const [forecasts, setForecasts] = useState<Record<string, PairStats | null>>({})
 
-  useEffect(() => {
-    const saved = loadFromStorage()
-    if (saved) {
-      setInputs(saved.inputs)
-      setCotData(saved.cotData)
+  // Restaura el estado guardado una sola vez, durante el render: en la
+  // hidratación el snapshot es `undefined` (coincide con el servidor) y justo
+  // después llega el valor real — sin setState síncrono en efectos ni mismatch.
+  const savedState = useSyncExternalStore(subscribeSavedMacroFx, readSavedMacroFx, readSavedMacroFxServer)
+  const [restored, setRestored] = useState(false)
+  if (!restored && savedState !== undefined) {
+    setRestored(true)
+    if (savedState) {
+      setInputs(savedState.inputs)
+      setCotData(savedState.cotData)
     }
+  }
 
+  useEffect(() => {
     fetch('/api/macro-fx/fred')
       .then(r => r.ok ? r.json() : null)
       .then((fred: FredActuals | null) => {

@@ -173,12 +173,6 @@ const SECTORS: SectorCycle[] = [
     note: "Se comporta como bono largo — sube cuando las tasas bajan" },
 ]
 
-const RATING = {
-  strong:  { label: "Outperform", icon: "↑", cell: "bg-green-950/60 text-green-300 border-green-900/50",  dot: "bg-green-400" },
-  neutral: { label: "Neutral",    icon: "→", cell: "bg-gray-900/60 text-gray-500 border-gray-800/50",      dot: "bg-gray-600" },
-  weak:    { label: "Underperform",icon:"↓", cell: "bg-red-950/60 text-red-400 border-red-900/50",         dot: "bg-red-500" },
-}
-
 // SVG donut wheel — 4 segments, clockwise starting from top
 // viewBox 0 0 300 300, center 150 150, R_outer=135, R_inner=70
 const WHEEL_PATHS: Record<Phase, string> = {

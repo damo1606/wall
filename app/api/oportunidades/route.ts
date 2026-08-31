@@ -3,6 +3,7 @@ import { supabaseServer } from "@/lib/supabase"
 import { computeOpportunityScore, type OpportunitySignals } from "@/lib/opportunity"
 import { getHistoricalPercentiles } from "@/lib/history"
 import { DJIA_SYMBOLS, NASDAQ100_SYMBOLS } from "@/lib/symbols"
+import { requireAuth, internalAuthHeaders } from "@/lib/api-auth"
 
 export const dynamic = "force-dynamic"
 
@@ -71,7 +72,12 @@ async function readLatestSnapshot(): Promise<{ rows: ConvictionPayload[]; asOf: 
 async function readLiveFallback(req: NextRequest): Promise<ConvictionPayload[]> {
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? `https://${req.headers.get("host")}`
   try {
-    const res = await fetch(`${base}/api/scanner-pro?universe=sp500&limit=30&minBuyScore=0`, { cache: "no-store" })
+    // scanner-pro exige auth: se propaga la credencial de quien nos llamó
+    // (cookie de sesión del navegador, o Bearer CRON_SECRET si viene de un cron).
+    const res = await fetch(`${base}/api/scanner-pro?universe=sp500&limit=30&minBuyScore=0`, {
+      cache: "no-store",
+      headers: await internalAuthHeaders(),
+    })
     if (!res.ok) return []
     const json = await res.json() as { rows?: ConvictionPayload[] }
     return json.rows ?? []
@@ -81,6 +87,7 @@ async function readLiveFallback(req: NextRequest): Promise<ConvictionPayload[]> 
 }
 
 export async function GET(req: NextRequest) {
+  const denied = await requireAuth(); if (denied) return denied;
   const universe = req.nextUrl.searchParams.get("universe") ?? "sp500"
 
   let { rows, asOf } = await readLatestSnapshot()

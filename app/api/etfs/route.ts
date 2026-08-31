@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
+import { requireAuth } from "@/lib/api-auth"
 
 export const dynamic = "force-dynamic"
 
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   const db: TypedClient = supabaseServer()
 
   // Universo: símbolos no-stock activos (ETFs, índices, etc.)

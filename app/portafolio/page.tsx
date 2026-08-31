@@ -7,8 +7,8 @@ import { scoreStock } from "@/lib/scoring"
 import type { ScoreBreakdown } from "@/lib/scoring"
 import {
   getPortfolio, addPosition, removePosition, updatePosition, sellPosition,
-  listPortfolios, type PortfolioMeta,
-  getWatchEntries, addWatch, removeWatch,
+  type PortfolioMeta,
+  getWatchEntries, removeWatch,
   getAlerts, addAlert, removeAlert, toggleAlertActive, markTriggered, resetAlert, checkAlerts,
   alertTypeLabel, alertThresholdSuffix, GRADE_ORDER, WATCH_LIMIT,
   importSorePortafolios,
@@ -363,7 +363,13 @@ function EditableCell({
   const [val, setVal] = useState(String(value))
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { setVal(String(value)) }, [value])
+  // Resetea el borrador cuando cambia la prop (patrón "prev state durante render"
+  // de la doc de React, en lugar de un useEffect con setState síncrono)
+  const [prevValue, setPrevValue] = useState(value)
+  if (prevValue !== value) {
+    setPrevValue(value)
+    setVal(String(value))
+  }
 
   if (!editing) {
     return (
@@ -485,7 +491,12 @@ export default function PortafolioPage() {
   const [portDir, setPortDir]     = useState<"asc" | "desc">("desc")
   const [watchSort, setWatchSort] = useState<WatchSortCol>("buyscore")
   const [watchDir, setWatchDir]   = useState<"asc" | "desc">("desc")
-  const [savedSignals, setSavedSignals] = useState<Record<string, string>>({})
+  // Señales guardadas: lectura perezosa de localStorage (en SSR devuelve {}).
+  // No provoca hydration mismatch: solo se usan junto a datos live, vacíos al montar.
+  const [savedSignals, setSavedSignals] = useState<Record<string, string>>(() => {
+    if (typeof window === "undefined") return {}
+    try { return JSON.parse(localStorage.getItem("wall_watchlist_state") ?? "{}") } catch { return {} }
+  })
   const [isLoggedIn, setIsLoggedIn]   = useState<boolean | null>(null)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [sellTarget, setSellTarget]   = useState<{ id: string; symbol: string; qty: number; price: number } | null>(null)
@@ -504,15 +515,17 @@ export default function PortafolioPage() {
     return <span className="text-[10px]">{active ? (dir === "desc" ? "▼" : "▲") : "↕"}</span>
   }
 
-  async function reload(pid?: string | null) {
-    const [p, w, a] = await Promise.all([
+  // Los setState viven en el .then para no ejecutarse síncronamente dentro de efectos
+  function reload(pid?: string | null) {
+    return Promise.all([
       getPortfolio(pid ?? selectedPortfolioId ?? undefined),
       getWatchEntries(),
       getAlerts(),
-    ])
-    setPortfolio(p)
-    setWatchList(w)
-    setAlerts(a)
+    ]).then(([p, w, a]) => {
+      setPortfolio(p)
+      setWatchList(w)
+      setAlerts(a)
+    })
   }
 
   // Cargar lista de portafolios + watch/alerts al montar
@@ -526,10 +539,6 @@ export default function PortafolioPage() {
       const def = list[list.length - 1]?.id ?? null
       setSelectedPortfolioId(def)
     }).catch(() => setIsLoggedIn(false))
-    try {
-      const saved = JSON.parse(localStorage.getItem("wall_watchlist_state") ?? "{}")
-      setSavedSignals(saved)
-    } catch {}
   }, [])
 
   // Recargar posiciones cuando cambia el portafolio seleccionado
@@ -570,13 +579,9 @@ export default function PortafolioPage() {
     setLoadingSymbols(new Set())
   }, [])
 
-  // Auto-fetch al cargar
-  useEffect(() => {
-    if (allSymbols.length === 0) return
-    const controller = new AbortController()
-    refreshData(allSymbols, controller.signal)
-    return () => controller.abort()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // Nota: no hay auto-fetch al montar — en el primer render no hay símbolos aún
+  // (portafolio/seguimiento/alertas empiezan vacíos); los datos live se piden
+  // con los botones de actualizar/verificar o al agregar una posición.
 
   // ── Alertas: verificar y marcar disparadas ──────────────────────────────────
   async function verifyAlerts() {

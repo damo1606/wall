@@ -1,10 +1,13 @@
 import { fetchStockData } from "@/lib/yahoo"
 import { DJIA_SYMBOLS, SP500_SYMBOLS, NASDAQ100_SYMBOLS, RUSSELL_SYMBOLS } from "@/lib/symbols"
+import { requireAuth } from "@/lib/api-auth"
+import { intParam } from "@/lib/query-params"
 
 export async function GET(request: Request) {
+  const denied = await requireAuth(); if (denied) return denied;
   const { searchParams } = new URL(request.url)
   const universe = searchParams.get("universe") ?? "dia"
-  const limit    = parseInt(searchParams.get("limit") ?? "50")
+  const limit    = intParam(searchParams.get("limit"), { def: 50, min: 1, max: 500 })
 
   const symbols = (
     universe === "dia"     ? DJIA_SYMBOLS :

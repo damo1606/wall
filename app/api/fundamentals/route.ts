@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
+import { requireAuth } from "@/lib/api-auth"
 
 export const dynamic = "force-dynamic"
 
@@ -22,6 +23,7 @@ type ViewRow = {
 }
 
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   const db: TypedClient = supabaseServer()
 
   // Snapshot más reciente persistido (para la etiqueta "datos al …")

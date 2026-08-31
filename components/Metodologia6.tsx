@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Analysis6Result, RegimeSignal, RegimeType, FearLabel, FearComponent } from "@/lib/gex6";
 import type { Analysis5Result } from "@/lib/gex5";
 
@@ -315,18 +315,23 @@ export default function Metodologia6({
   const [loading, setLoading] = useState(false);
   const [error, setError]   = useState("");
 
-  async function fetchAll() {
+  const fetchAll = useCallback(async () => {
     if (!ticker.trim()) return;
-    setLoading(true);
-    setError("");
     try {
       const url5 = expiration
         ? `/api/analysis5?ticker=${ticker}&upTo=${expiration}`
         : `/api/analysis5?ticker=${ticker}`;
-      const [res6, res5] = await Promise.all([
+      // Lanza ambas peticiones de inmediato para conservar el timing de red
+      const responses = Promise.all([
         fetch(`/api/analysis6?ticker=${encodeURIComponent(ticker)}`),
         fetch(url5),
       ]);
+      // Tras el primer await, estos setState ya no se ejecutan de forma
+      // síncrona dentro del cuerpo del efecto que invoca esta función
+      await Promise.resolve();
+      setLoading(true);
+      setError("");
+      const [res6, res5] = await responses;
       const json6 = await res6.json();
       if (!res6.ok) throw new Error(json6.error ?? "Error");
       setData(json6);
@@ -334,18 +339,24 @@ export default function Metodologia6({
         const json5 = await res5.json();
         setData5(json5);
       }
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // `unknown` + narrowing: solo las instancias de Error exponen `message`
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }
+  }, [ticker, expiration]);
 
+  // Se dispara solo cuando el usuario pulsa Analizar (cambia analyzeKey), pero
+  // leyendo el ticker y la expiración VIGENTES. Con `[analyzeKey]` como única
+  // dependencia el efecto arrastraba los valores capturados en un render
+  // anterior y podía pintar el análisis de otro ticker.
+  const ultimaClave = useRef(0);
   useEffect(() => {
-    if (analyzeKey > 0 && ticker) {
-      fetchAll();
-    }
-  }, [analyzeKey]);
+    if (analyzeKey === 0 || !ticker || ultimaClave.current === analyzeKey) return;
+    ultimaClave.current = analyzeKey;
+    fetchAll();
+  }, [analyzeKey, ticker, fetchAll]);
 
   const regime = data?.regime;
   const color  = regime ? regimeColor(regime) : "text-muted";

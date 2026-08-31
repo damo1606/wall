@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { computeAnalysis } from "@/lib/gex";
+import { requireAuth } from "@/lib/api-auth"
 
 const HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -22,6 +23,13 @@ const SECTOR_ETFS = [
   { ticker: "GLD",  label: "Oro",                group: "alternative" },
   { ticker: "TLT",  label: "Bonos 20Y",          group: "alternative" },
 ] as const;
+
+// Campos que usamos de cada contrato de la cadena de opciones de Yahoo.
+type YahooRawOption = {
+  strike?: number;
+  impliedVolatility?: number;
+  openInterest?: number;
+};
 
 async function getCredentials(): Promise<{ crumb: string; cookie: string }> {
   const res1 = await fetch("https://fc.yahoo.com", { headers: HEADERS, redirect: "follow" });
@@ -53,6 +61,7 @@ function toVerdict(pressure: number): "ALCISTA" | "BAJISTA" | "NEUTRAL" {
 }
 
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   try {
     const { crumb, cookie } = await getCredentials();
 
@@ -71,12 +80,12 @@ export async function GET() {
         );
         const primaryExp = availableExpirations[0] ?? "";
 
-        const calls = (optData.calls ?? []).map((c: any) => ({
+        const calls = (optData.calls ?? []).map((c: YahooRawOption) => ({
           strike: c.strike ?? 0,
           impliedVolatility: c.impliedVolatility ?? 0,
           openInterest: c.openInterest ?? 0,
         }));
-        const puts = (optData.puts ?? []).map((p: any) => ({
+        const puts = (optData.puts ?? []).map((p: YahooRawOption) => ({
           strike: p.strike ?? 0,
           impliedVolatility: p.impliedVolatility ?? 0,
           openInterest: p.openInterest ?? 0,
@@ -122,7 +131,7 @@ export async function GET() {
     etfs.sort((a, b) => b.institutionalPressure - a.institutionalPressure);
 
     return NextResponse.json({ etfs, timestamp: new Date().toISOString() });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "Unknown error" }, { status: 500 });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Unknown error" }, { status: 500 });
   }
 }

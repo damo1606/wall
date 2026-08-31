@@ -97,7 +97,8 @@ export default function ScreenerPage() {
   function toggleWatch(symbol: string) {
     setWatchlist(prev => {
       const next = new Set(prev)
-      next.has(symbol) ? next.delete(symbol) : next.add(symbol)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
       localStorage.setItem("descuentos-watchlist", JSON.stringify([...next]))
       return next
     })
@@ -159,7 +160,7 @@ export default function ScreenerPage() {
       case "price":   return s.currentPrice
       case "drop":    return s.dropFrom52w
       case "graham":  return s.discountToGraham
-      case "upside":  return s.upsideToTarget
+      case "upside":  return s.score.consensus.expectedUpside ?? 0
       case "pe":      return s.pe
       case "pb":      return s.pb
       case "roe":     return s.roe * 100
@@ -303,9 +304,15 @@ export default function ScreenerPage() {
                     <div className={`text-xs font-mono mt-1 ${s.discountToGraham <= -10 ? "text-green-400" : s.discountToGraham >= 0 ? "text-red-400" : "text-yellow-300"}`}>
                       Graham: {s.discountToGraham >= 0 ? "+" : ""}{s.discountToGraham.toFixed(1)}%
                     </div>
-                    <div className={`text-xs font-mono mt-0.5 ${s.upsideToTarget >= 20 ? "text-green-400" : s.upsideToTarget >= 0 ? "text-yellow-300" : "text-red-400"}`}>
-                      Upside: {pct(s.upsideToTarget)}
-                    </div>
+                    {s.score.consensus.available && (() => {
+                      const up = s.score.consensus.expectedUpside ?? 0
+                      return (
+                        <div className={`text-xs font-mono mt-0.5 ${up >= 20 ? "text-green-400" : up >= 0 ? "text-yellow-300" : "text-red-400"}`}>
+                          Upside: {pct(up)}
+                          {s.score.consensus.dispersionLabel === "DISPERSO" && <span className="ml-1 text-gray-600" title="Objetivos de analistas muy dispersos">~</span>}
+                        </div>
+                      )
+                    })()}
                     <div className="mt-2">
                       <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${s.score.signal === "Compra Fuerte" ? "bg-emerald-500 text-white" : "bg-green-600 text-white"}`}>
                         {s.score.signal === "Compra Fuerte" ? "▲▲" : "▲"} {s.score.signal}
@@ -402,10 +409,12 @@ export default function ScreenerPage() {
                         {s.grahamNumber > 0 ? <GrahamBadge value={s.discountToGraham} /> : <span className="text-gray-600">—</span>}
                       </td>
                       <td className="py-3 pr-4 text-right font-mono text-gray-300">
-                        {s.analystTarget > 0 ? `$${s.analystTarget.toFixed(2)}` : "—"}
+                        {s.score.consensus.base ? `$${s.score.consensus.base.price.toFixed(2)}` : "—"}
                       </td>
                       <td className="py-3 pr-4 text-right">
-                        {s.analystTarget > 0 ? <UpBadge value={s.upsideToTarget} /> : <span className="text-gray-600">—</span>}
+                        {s.score.consensus.available
+                          ? <UpBadge value={s.score.consensus.expectedUpside ?? 0} />
+                          : <span className="text-gray-600">—</span>}
                       </td>
                       <td className="py-3 pr-4 text-right font-mono">{fmt(s.pe)}</td>
                       <td className="py-3 pr-4 text-right font-mono">{fmt(s.pb)}</td>

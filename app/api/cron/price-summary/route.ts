@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
+import { intParam } from "@/lib/query-params"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -171,9 +172,9 @@ export async function GET(req: NextRequest) {
   }
 
   const url        = new URL(req.url)
-  const batchStart = Math.max(0, parseInt(url.searchParams.get("batch_start") ?? "0", 10))
-  const batchSize  = Math.max(1, Math.min(2000, parseInt(url.searchParams.get("batch_size") ?? "500", 10)))
-  const chunkSize  = Math.max(1, Math.min(200, parseInt(url.searchParams.get("chunk_size") ?? "50", 10)))
+  const batchStart = intParam(url.searchParams.get("batch_start"), { def: 0, min: 0 })
+  const batchSize  = intParam(url.searchParams.get("batch_size"), { def: 500, min: 1, max: 2000 })
+  const chunkSize  = intParam(url.searchParams.get("chunk_size"), { def: 50, min: 1, max: 200 })
 
   const db = supabaseServer()
   const startedAt = Date.now()

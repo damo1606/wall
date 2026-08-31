@@ -68,8 +68,9 @@ export default function DataQualityPage() {
   const [loading, setLoading] = useState(true)
   const [lastCheck, setLastCheck] = useState("")
 
+  // Sin setState síncrono: el efecto de montaje la llama con `loading` ya en
+  // true (estado inicial) y el botón de refresco enciende el loader él mismo.
   async function runCheck() {
-    setLoading(true)
     const tStart = Date.now()
 
     const sourcesList = [
@@ -117,7 +118,8 @@ export default function DataQualityPage() {
     void tStart
   }
 
-  useEffect(() => { runCheck() }, [])
+  // Microtarea: los setState de runCheck no corren síncronos dentro del efecto
+  useEffect(() => { Promise.resolve().then(runCheck) }, [])
 
   const okCount      = indicators.filter(i => i.status === "ok").length
   const missingCount = indicators.filter(i => i.status === "missing").length
@@ -204,7 +206,7 @@ export default function DataQualityPage() {
         <div className="border border-border bg-surface rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <h2 className="text-xs font-bold tracking-widest text-accent">FUENTES UPSTREAM</h2>
-            <button onClick={runCheck} disabled={loading}
+            <button onClick={() => { setLoading(true); runCheck() }} disabled={loading}
               className="text-[10px] px-3 py-1 border border-border hover:border-accent hover:text-accent transition-colors tracking-widest disabled:opacity-40">
               {loading ? "VERIFICANDO..." : "RE-VERIFICAR"}
             </button>

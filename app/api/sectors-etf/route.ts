@@ -1,3 +1,4 @@
+import { requireAuth } from "@/lib/api-auth"
 // Rendimiento real de ETFs sectoriales del S&P 500 — vía Yahoo Finance
 // XLK, XLF, XLV, etc. — Select Sector SPDRs
 
@@ -70,6 +71,7 @@ async function fetchEtf(symbol: string, auth: { crumb: string; cookie: string })
 }
 
 export async function GET() {
+  const denied = await requireAuth(); if (denied) return denied;
   try {
     const auth = await getAuth()
     if (!auth) return Response.json({ error: "Auth failed" }, { status: 503 })

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabase"
 import { computeTriggerScore } from "@/lib/triggers/scoring"
+import { requireAuth } from "@/lib/api-auth"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 30
@@ -77,7 +78,8 @@ export async function GET(): Promise<NextResponse<TriggersState | { error: strin
   // Lookups: símbolos, reglas, precios
   const allSymbolIds = new Set<string>()
   const allRuleIds   = new Set<string>()
-  for (const r of openRaw ?? []) { allSymbolIds.add(r.symbol_id); allRuleIds.add(r.rule_id) }
+  for (const r of openRaw ?? []) {
+  const denied = await requireAuth(); if (denied) return denied; allSymbolIds.add(r.symbol_id); allRuleIds.add(r.rule_id) }
 
   const exitEntryIds = (exitsRaw ?? []).map(e => e.entry_id)
   let exitEntriesData: Array<{ id: string; symbol_id: string; rule_id: string; entry_date: string; entry_price: number }> = []

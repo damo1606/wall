@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getCrumb } from "@/lib/yahoo"
+import { requireAuth } from "@/lib/api-auth"
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -11,6 +12,7 @@ const TF: Record<string, { interval: string; range: string; daily: boolean }> = 
 }
 
 export async function GET(req: Request) {
+  const denied = await requireAuth(); if (denied) return denied;
   const { searchParams } = new URL(req.url)
   const symbol = (searchParams.get("symbol") ?? "GLD").toUpperCase()
   const tf     = searchParams.get("tf") ?? "1d"

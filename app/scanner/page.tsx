@@ -67,6 +67,44 @@ function scoreBadge(score: number): string {
 interface Expiration { ts: number; date: string; }
 interface LivePrice { price: number; change: number; changePct: number; }
 
+// Encabezado de columna ordenable — a nivel de módulo para no recrear el
+// componente en cada render de la página (react-hooks/static-components)
+function SortHeader({ label, k, sortKey, sortAsc, onSort }: {
+  label: string;
+  k: SortKey;
+  sortKey: SortKey;
+  sortAsc: boolean;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKey === k;
+  return (
+    <th
+      className={`px-3 py-2 text-left text-[10px] tracking-widest font-bold cursor-pointer select-none whitespace-nowrap ${active ? "text-accent" : "text-muted"} hover:text-text transition-colors`}
+      onClick={() => onSort(k)}
+    >
+      {label} {active ? (sortAsc ? "▲" : "▼") : ""}
+    </th>
+  );
+}
+
+// Trae precios en vivo y reporta vía callbacks. Vive fuera del componente para
+// que el efecto no llame setState de forma síncrona (react-hooks/set-state-in-effect):
+// los setters solo se invocan tras resolver el fetch.
+async function fetchLivePrices(
+  tickers: string,
+  onPrices: (prices: Record<string, LivePrice>) => void,
+  onTimestamp: (ts: string) => void,
+) {
+  try {
+    const res = await fetch(`/api/scanner/prices?tickers=${encodeURIComponent(tickers)}`);
+    const json = await res.json();
+    if (json.prices) {
+      onPrices(json.prices);
+      onTimestamp(new Date().toLocaleTimeString("es-ES"));
+    }
+  } catch {}
+}
+
 export default function ScannerPage() {
   const [tickerInput, setTickerInput] = useState(DEFAULT_TICKERS);
   const [rows, setRows] = useState<AnomalyRow[]>([]);
@@ -85,22 +123,11 @@ export default function ScannerPage() {
   const [lastPrice, setLastPrice] = useState("");
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  async function fetchLivePrices(tickers: string) {
-    try {
-      const res = await fetch(`/api/scanner/prices?tickers=${encodeURIComponent(tickers)}`);
-      const json = await res.json();
-      if (json.prices) {
-        setLivePrices(json.prices);
-        setLastPrice(new Date().toLocaleTimeString("es-ES"));
-      }
-    } catch {}
-  }
-
   // Auto-refresh prices every 30s
   useEffect(() => {
     const tickers = tickerInput.split(",").map((t) => t.trim().toUpperCase()).filter(Boolean).join(",");
-    fetchLivePrices(tickers);
-    intervalRef.current = setInterval(() => fetchLivePrices(tickers), 30000);
+    fetchLivePrices(tickers, setLivePrices, setLastPrice);
+    intervalRef.current = setInterval(() => fetchLivePrices(tickers, setLivePrices, setLastPrice), 30000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [tickerInput]);
 
@@ -128,8 +155,9 @@ export default function ScannerPage() {
       setRows(json.rows ?? []);
       setScannedTickers(json.scannedTickers ?? []);
       setLastScan(new Date().toLocaleTimeString("es-ES"));
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e) {
+      // e es unknown en TS strict: extraemos el mensaje solo si es un Error real
+      setError(e instanceof Error ? e.message : String(e));
     }
     setLoading(false);
   }
@@ -150,18 +178,6 @@ export default function ScannerPage() {
     });
 
   const uniqueTickers = ["ALL", ...Array.from(new Set(rows.map((r) => r.ticker)))];
-
-  function SortHeader({ label, k }: { label: string; k: SortKey }) {
-    const active = sortKey === k;
-    return (
-      <th
-        className={`px-3 py-2 text-left text-[10px] tracking-widest font-bold cursor-pointer select-none whitespace-nowrap ${active ? "text-accent" : "text-muted"} hover:text-text transition-colors`}
-        onClick={() => handleSort(k)}
-      >
-        {label} {active ? (sortAsc ? "▲" : "▼") : ""}
-      </th>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-bg text-text">
@@ -301,19 +317,19 @@ export default function ScannerPage() {
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b-2 border-accent bg-surface">
-                  <SortHeader label="TICKER" k="ticker" />
-                  <SortHeader label="SPOT" k="spot" />
-                  <SortHeader label="STRIKE" k="strike" />
+                  <SortHeader label="TICKER" k="ticker" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="SPOT" k="spot" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="STRIKE" k="strike" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
                   <th className="px-3 py-2 text-left text-[10px] tracking-widest font-bold text-muted">STRIKE VS SPOT</th>
                   <th className="px-3 py-2 text-left text-[10px] tracking-widest font-bold text-muted">TIPO</th>
-                  <SortHeader label="VENCE" k="expiration" />
-                  <SortHeader label="OI" k="oi" />
-                  <SortHeader label="VOLUMEN" k="volume" />
-                  <SortHeader label="VOL/OI" k="volOiRatio" />
-                  <SortHeader label="IV %" k="iv" />
-                  <SortHeader label="Z-SCORE OI" k="oiZScore" />
-                  <SortHeader label="ANOMALÍA" k="anomalyScore" />
-                  <SortHeader label="SESGO" k="bias" />
+                  <SortHeader label="VENCE" k="expiration" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="OI" k="oi" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="VOLUMEN" k="volume" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="VOL/OI" k="volOiRatio" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="IV %" k="iv" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="Z-SCORE OI" k="oiZScore" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="ANOMALÍA" k="anomalyScore" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
+                  <SortHeader label="SESGO" k="bias" sortKey={sortKey} sortAsc={sortAsc} onSort={handleSort} />
                 </tr>
               </thead>
               <tbody>

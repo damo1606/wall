@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import type { StockData } from "@/lib/yahoo"
 import { scoreStock } from "@/lib/scoring"
@@ -9,6 +9,38 @@ import {
   tradeResult, tradeResultPct,
 } from "@/lib/diario"
 import type { TradeEntry, TradeDirection } from "@/lib/diario"
+
+// ─── Store externo del diario (localStorage vía lib/diario) ──────────────────
+// useSyncExternalStore reemplaza el patrón "leer localStorage al montar":
+// el servidor ve la lista vacía (getServerSnapshot) y el cliente se sincroniza
+// tras hidratar, sin setState síncrono en un efecto ni hydration mismatch.
+
+const EMPTY_TRADES: TradeEntry[] = []
+const tradeListeners = new Set<() => void>()
+let tradesCache: TradeEntry[] | null = null
+
+function subscribeTrades(cb: () => void) {
+  tradeListeners.add(cb)
+  return () => {
+    tradeListeners.delete(cb)
+    tradesCache = null // fuerza relectura de localStorage en el próximo montaje
+  }
+}
+
+function readTrades(): TradeEntry[] {
+  if (tradesCache === null) tradesCache = getTrades()
+  return tradesCache
+}
+
+function readTradesServer(): TradeEntry[] {
+  return EMPTY_TRADES
+}
+
+// Refresca el snapshot tras mutar el diario (add/close/remove)
+function refreshTrades() {
+  tradesCache = getTrades()
+  tradeListeners.forEach(cb => cb())
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -204,26 +236,24 @@ function AddTradeModal({ onClose, onAdd }: {
 // ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function DiarioPage() {
-  const [trades,      setTrades]      = useState<TradeEntry[]>([])
+  const trades = useSyncExternalStore(subscribeTrades, readTrades, readTradesServer)
   const [showAdd,     setShowAdd]     = useState(false)
   const [closingId,   setClosingId]   = useState<string | null>(null)
   const [filterOpen,  setFilterOpen]  = useState<"all" | "open" | "closed" | "stats">("all")
 
-  useEffect(() => { setTrades(getTrades()) }, [])
-
   function handleAdd(entry: Omit<TradeEntry, "id">) {
     addTrade(entry)
-    setTrades(getTrades())
+    refreshTrades()
   }
 
   function handleClose(id: string, exitPrice: number) {
     closeTrade(id, exitPrice)
-    setTrades(getTrades())
+    refreshTrades()
   }
 
   function handleRemove(id: string) {
     removeTrade(id)
-    setTrades(getTrades())
+    refreshTrades()
   }
 
   const filtered = trades.filter(t => {
