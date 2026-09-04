@@ -1,10 +1,10 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
 
 const input = process.argv[2];
 const output = process.argv[3];
 if (!input || !output) {
-  console.error('Usage: node md-to-html.js <input.md> <output.html>');
+  console.error('Usage: node md-to-html.mjs <input.md> <output.html>');
   process.exit(1);
 }
 
@@ -25,7 +25,6 @@ function inline(s) {
 const lines = md.split(/\r?\n/);
 let html = '';
 let inTable = false;
-let tableHeader = false;
 let inCode = false;
 let inList = false;
 let listType = null;
@@ -42,7 +41,6 @@ function closeTable() {
   if (inTable) {
     html += '</tbody></table>\n';
     inTable = false;
-    tableHeader = false;
   }
 }
 
@@ -67,7 +65,6 @@ for (let i = 0; i < lines.length; i++) {
       for (const c of cells) html += `<th>${inline(esc(c))}</th>`;
       html += '</tr></thead><tbody>\n';
       inTable = true;
-      tableHeader = true;
       i++;
       continue;
     }
