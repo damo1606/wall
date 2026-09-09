@@ -1,7 +1,7 @@
 import type { Currency, COTData } from '@/types/forex'
 
 // CFTC Financial Futures legacy report (weekly, public)
-const CFTC_URL = 'https://www.cftc.gov/files/dea/newcot/FinFut.txt'
+const CFTC_URL = 'https://www.cftc.gov/dea/newcot/FinFutWk.txt'
 
 // Mapeo de nombre de contrato CFTC → divisa
 const CONTRACT_MAP: Record<string, Currency> = {
