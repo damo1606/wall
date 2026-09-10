@@ -234,14 +234,16 @@ export async function GET(req: NextRequest) {
       meanReturnDelta: parseFloat((crowdedLongStats.meanReturn - baselineStats.meanReturn).toFixed(2)),
       tStatistic: parseFloat(tLong.t.toFixed(2)),
       pValue: parseFloat(tLong.pTwoSided.toFixed(4)),
-      significant: tLong.pTwoSided <= 0.10,
+      // No solo p-value: un retorno significativamente por ENCIMA del baseline
+      // (t positivo) no valida la tesis "crowded long → cae" aunque p sea bajo.
+      significant: meetsLong,
     },
     crowdedShort: {
       ...crowdedShortStats,
       meanReturnDelta: parseFloat((crowdedShortStats.meanReturn - baselineStats.meanReturn).toFixed(2)),
       tStatistic: parseFloat(tShort.t.toFixed(2)),
       pValue: parseFloat(tShort.pTwoSided.toFixed(4)),
-      significant: tShort.pTwoSided <= 0.10,
+      significant: meetsShort,
     },
     byYear,
     verdict,
