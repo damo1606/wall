@@ -66,3 +66,76 @@ function findCurrency(name: string): Currency | null {
   }
   return null
 }
+
+// ─── Índices bursátiles (S&P 500, Nasdaq, Dow, Russell) ─────────────────────
+//
+// Mismo archivo semanal (reporte "Financial Futures"), pero es TFF, no Legacy:
+// no existe columna "Non-Commercial" — clasifica por Dealer / Asset Manager /
+// Leveraged Money / Other Reportables. Usamos Leveraged Money (fondos
+// apalancados/especulativos): es el equivalente TFF más cercano al "dinero
+// especulativo" que NonComm mide en el reporte Legacy que usan las divisas.
+// Columnas (0-indexed, confirmadas contra el archivo real del CFTC):
+//   7  Open_Interest_All
+//   14 Lev_Money_Positions_Long_All
+//   15 Lev_Money_Positions_Short_All
+//
+// Nota: las columnas 5/6 que usa `parseCOT` arriba para divisas NO son
+// NonComm_Long/Short en este archivo — son región/código de commodity. Ese
+// parser lee columnas equivocadas para un formato que además no es el que cree
+// (Legacy vs TFF). No se toca aquí porque cambia una señal ya en producción;
+// lib/cot.ts necesita ese fix aparte.
+
+export type IndexSymbol = 'SPX' | 'NDX' | 'DJI' | 'RUT'
+
+// Un contrato representativo y líquido por índice — el mismo que cotiza en
+// Yahoo (ES=F, NQ=F, YM=F, RTY=F) — para que precio y posicionamiento midan
+// exactamente el mismo instrumento.
+const INDEX_CONTRACT_MAP: Record<string, IndexSymbol> = {
+  'E-MINI S&P 500':  'SPX',
+  'NASDAQ MINI':      'NDX',
+  'DJIA X $5':        'DJI',
+  'RUSSELL E-MINI':   'RUT',
+}
+
+export type IndexCOTData = Partial<Record<IndexSymbol, number>>  // -1 | 0 | 1 (neto largo/corto)
+
+export async function fetchIndexCOTData(): Promise<IndexCOTData> {
+  const res = await fetch(CFTC_URL, {
+    next: { revalidate: 60 * 60 * 24 }, // cache 24h — datos semanales
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+  })
+  if (!res.ok) throw new Error(`CFTC fetch failed: ${res.status}`)
+
+  const text = await res.text()
+  return parseIndexCOT(text)
+}
+
+export function parseIndexCOT(text: string): IndexCOTData {
+  const result: IndexCOTData = {}
+  const lines = text.split('\n')
+
+  for (const line of lines) {
+    const cols = line.split(',').map(s => s.trim().replace(/^"|"$/g, ''))
+    if (cols.length < 16) continue
+
+    const name = cols[0].toUpperCase()
+    const symbol = findIndex(name)
+    if (!symbol) continue
+
+    const longs  = parseInt(cols[14], 10)
+    const shorts = parseInt(cols[15], 10)
+    if (isNaN(longs) || isNaN(shorts)) continue
+
+    const net = longs - shorts
+    result[symbol] = net > 0 ? 1 : net < 0 ? -1 : 0
+  }
+
+  return result
+}
+
+function findIndex(name: string): IndexSymbol | null {
+  for (const [key, symbol] of Object.entries(INDEX_CONTRACT_MAP)) {
+    if (name.startsWith(key)) return symbol
+  }
+  return null
+}

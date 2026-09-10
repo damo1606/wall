@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 
 type Result = {
   config: { cssThreshold: number; horizonDays: number; rollingWindow: number; dataStart: string; dataEnd: string; totalDays: number }
@@ -34,7 +35,12 @@ export default function BacktestPage() {
     <div className="min-h-screen bg-bg text-text">
       <div className="border-b border-border px-4 sm:px-6 py-5 bg-surface">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-xl font-black tracking-[0.2em] text-accent mb-1">BACKTEST · SORE Signal</h1>
+          <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
+            <h1 className="text-xl font-black tracking-[0.2em] text-accent">BACKTEST · SORE Signal</h1>
+            <Link href="/backtest/cot-index" className="text-[10px] text-muted hover:text-accent tracking-widest">
+              COT ÍNDICES (Leveraged Money) →
+            </Link>
+          </div>
           <p className="text-xs text-subtle max-w-3xl">
             Validación VIX-proxy del signal: cuando VIX está en percentil &gt; N, ¿la volatilidad realizada de los siguientes 30 días
             queda por debajo de la implícita? Si sí, vender prima tiene edge estadístico real.
