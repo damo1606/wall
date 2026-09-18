@@ -18,6 +18,15 @@ const STORAGE_KEY = 'macro-fx-state'
 type Tab = 'resumen' | 'datos'
 type FredActuals = Partial<Record<Currency, Partial<Record<MacroIndicator, string>>>>
 
+// Fecha de release conocida por celda — viene de /api/macro-fx/releases.
+// Sin esto no se puede persistir un blur-save (no sabemos contra qué
+// release_date hacer upsert); la celda sigue funcionando solo en localStorage.
+type ReleaseDates = Partial<Record<Currency, Partial<Record<MacroIndicator, string>>>>
+
+type ReleasesApiResponse = {
+  current: Partial<Record<Currency, Partial<Record<MacroIndicator, { actual: string; consensus: string; previous: string; releaseDate: string; source: string }>>>>
+}
+
 interface ComputedState {
   scores: Record<Currency, CurrencyScore>
   pairScores: PairScore[]
@@ -89,6 +98,7 @@ export default function MacroFXPage() {
   const [loading, setLoading] = useState(false)
   const [fredActuals, setFredActuals] = useState<FredActuals>({})
   const [forecasts, setForecasts] = useState<Record<string, PairStats | null>>({})
+  const [releaseDates, setReleaseDates] = useState<ReleaseDates>({})
 
   // Restaura el estado guardado una sola vez, durante el render: en la
   // hidratación el snapshot es `undefined` (coincide con el servidor) y justo
@@ -104,6 +114,39 @@ export default function MacroFXPage() {
   }
 
   useEffect(() => {
+    // Servidor como fuente de verdad: consensus/previous llegan ya
+    // auto-rellenados por el cron de ForexFactory. Best-effort — si falla,
+    // el grid sigue funcionando solo con localStorage (degradación aislada).
+    fetch('/api/macro-fx/releases')
+      .then(r => r.ok ? r.json() : null)
+      .then((res: ReleasesApiResponse | null) => {
+        if (!res?.current) return
+        const dates: ReleaseDates = {}
+        setInputs(prev => {
+          const next = { ...prev }
+          for (const [c, byIndicator] of Object.entries(res.current)) {
+            const currency = c as Currency
+            next[currency] = { ...next[currency] }
+            dates[currency] = {}
+            for (const [ind, cell] of Object.entries(byIndicator ?? {})) {
+              const indicator = ind as MacroIndicator
+              if (!cell) continue
+              dates[currency]![indicator] = cell.releaseDate
+              // No pisar una edición local sin guardar todavía: solo llena
+              // lo que el servidor tiene y el estado local tiene vacío.
+              const cur = next[currency][indicator]
+              next[currency][indicator] = {
+                actual:    cur.actual    || cell.actual,
+                consensus: cur.consensus || cell.consensus,
+              }
+            }
+          }
+          return next
+        })
+        setReleaseDates(dates)
+      })
+      .catch(() => {})
+
     fetch('/api/macro-fx/fred')
       .then(r => r.ok ? r.json() : null)
       .then((fred: FredActuals | null) => {
@@ -153,6 +196,24 @@ export default function MacroFXPage() {
       })
     },
     [],
+  )
+
+  // Guarda una celda al perder foco — solo si ya conocemos su release_date
+  // (viene de una fila sincronizada por el cron de ForexFactory o de un guardado
+  // previo). Sin eso no hay contra qué hacer upsert; la celda sigue en
+  // localStorage nada más, no se pierde el valor tecleado.
+  const handleBlurSave = useCallback(
+    (currency: Currency, indicator: MacroIndicator, field: 'actual' | 'consensus') => {
+      const releaseDate = releaseDates[currency]?.[indicator]
+      if (!releaseDate) return
+      const value = inputs[currency][indicator][field]
+      fetch('/api/macro-fx/releases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currency, indicator, release_date: releaseDate, [field]: value }),
+      }).catch(() => {})
+    },
+    [inputs, releaseDates],
   )
 
   const handleCOTUpdate = useCallback((data: COTData) => {
@@ -238,7 +299,7 @@ export default function MacroFXPage() {
 
       {tab === 'datos' && (
         <div className="flex flex-col gap-4">
-          <MacroInputGrid inputs={inputs} onChange={handleInputChange} fredActuals={fredActuals} />
+          <MacroInputGrid inputs={inputs} onChange={handleInputChange} onBlurSave={handleBlurSave} fredActuals={fredActuals} />
           <COTPanel cotData={cotData} onUpdate={handleCOTUpdate} />
           <div className="flex justify-end">
             <button

@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
   }
 
   const takenAt = new Date().toISOString()
-  let marketOk = 0, quarterlyOk = 0, incomeOk = 0, profileOk = 0, scoreOk = 0
+  let marketOk = 0, quarterlyOk = 0, incomeOk = 0, profileOk = 0, scoreOk = 0, analystOk = 0
   let fetchFailed = 0, insertErrors = 0
   const failedTickers: string[] = []
   const insertErrMsgs: string[] = []
@@ -95,6 +95,20 @@ export async function GET(req: NextRequest) {
     } as never)
     if (!mErr) marketOk++
     else if (!benign(mErr)) noteErr(s.ticker, "market", mErr)
+
+    // analyst_consensus_snapshots — target price + rating de analistas.
+    // Campos que fetchStockData() ya trae (financialData de Yahoo); 0 fetches
+    // adicionales. Se persiste para poder backtestear si el consenso predijo
+    // el movimiento real del precio.
+    const { error: aErr } = await db.from("analyst_consensus_snapshots").insert({
+      symbol_id: s.id, taken_at: takenAt, cron_run_id: runId,
+      target_mean: d.analystTarget || null, target_median: d.analystTargetMedian || null,
+      target_high: d.analystTargetHigh || null, target_low: d.analystTargetLow || null,
+      analyst_count: d.analystCount || null, recommendation_mean: d.recommendationMean || null,
+      recommendation_key: d.recommendationKey || null, source: "yahoo",
+    } as never)
+    if (!aErr) analystOk++
+    else if (!benign(aErr)) noteErr(s.ticker, "analyst", aErr)
 
     // fundamentals_quarterly — múltiplos y ratios derivados
     const { error: qErr } = await db.from("fundamentals_quarterly").insert({
@@ -161,7 +175,7 @@ export async function GET(req: NextRequest) {
   })
 
   const durationMs = Date.now() - startedAt
-  const rowsInserted = marketOk + quarterlyOk + incomeOk + profileOk + scoreOk
+  const rowsInserted = marketOk + quarterlyOk + incomeOk + profileOk + scoreOk + analystOk
   const hadProblems = fetchFailed > 0 || insertErrors > 0
   const status: "success" | "partial" | "failed" =
     !hadProblems ? "success" : (rowsInserted > 0 ? "partial" : "failed")
@@ -182,7 +196,7 @@ export async function GET(req: NextRequest) {
     ok: status !== "failed", runId, status,
     batch_start: batchStart, batch_size: batchSize,
     processed: syms.length,
-    market_ok: marketOk, quarterly_ok: quarterlyOk, income_ok: incomeOk, profile_ok: profileOk, score_ok: scoreOk,
+    market_ok: marketOk, quarterly_ok: quarterlyOk, income_ok: incomeOk, profile_ok: profileOk, score_ok: scoreOk, analyst_ok: analystOk,
     fetch_failed: fetchFailed, insert_errors: insertErrors, duration_ms: durationMs,
     next_batch_start: done ? null : batchStart + batchSize, done,
   })

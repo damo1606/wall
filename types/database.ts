@@ -464,6 +464,111 @@ export type Database = {
           },
         ]
       }
+      // Añadidas a mano (migraciones 20260917120000/120100) — pendiente de
+      // regenerar con `supabase gen types` contra la DB real, que las
+      // reordenará alfabéticamente y confirmará el shape exacto.
+      analyst_consensus_snapshots: {
+        Row: {
+          id: string
+          symbol_id: string
+          taken_at: string
+          cron_run_id: string | null
+          target_mean: number | null
+          target_median: number | null
+          target_high: number | null
+          target_low: number | null
+          analyst_count: number | null
+          recommendation_mean: number | null
+          recommendation_key: string | null
+          source: string
+        }
+        Insert: {
+          id?: string
+          symbol_id: string
+          taken_at: string
+          cron_run_id?: string | null
+          target_mean?: number | null
+          target_median?: number | null
+          target_high?: number | null
+          target_low?: number | null
+          analyst_count?: number | null
+          recommendation_mean?: number | null
+          recommendation_key?: string | null
+          source?: string
+        }
+        Update: {
+          id?: string
+          symbol_id?: string
+          taken_at?: string
+          cron_run_id?: string | null
+          target_mean?: number | null
+          target_median?: number | null
+          target_high?: number | null
+          target_low?: number | null
+          analyst_count?: number | null
+          recommendation_mean?: number | null
+          recommendation_key?: string | null
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analyst_consensus_snapshots_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "analyst_consensus_snapshots_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      macro_indicator_releases: {
+        Row: {
+          id: string
+          currency: string
+          indicator: string
+          release_date: string
+          period: string | null
+          event_title: string | null
+          actual: number | null
+          consensus: number | null
+          previous_raw: number | null
+          source: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          currency: string
+          indicator: string
+          release_date: string
+          period?: string | null
+          event_title?: string | null
+          actual?: number | null
+          consensus?: number | null
+          previous_raw?: number | null
+          source?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          currency?: string
+          indicator?: string
+          release_date?: string
+          period?: string | null
+          event_title?: string | null
+          actual?: number | null
+          consensus?: number | null
+          previous_raw?: number | null
+          source?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       cron_runs: {
         Row: {
           duration_ms: number | null

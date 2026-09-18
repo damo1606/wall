@@ -41,6 +41,11 @@ Diseño de base de datos para las funciones actuales de Wall, optimizado para qu
 **Columnas:** `id`, `symbol_id`, `methodology` (`M1..M7`), `score` (0-100), `components (jsonb)`, `taken_at`, `cron_run_id`.
 **Sirve:** screener ordenado, señales, comparador, `/track-record`.
 
+### `analyst_consensus_snapshots`
+**Para qué:** consenso de analistas (target price, rating) por símbolo y día — append-only, vía el mismo cron de `fundamentals` (0 fetches nuevos, Yahoo ya trae estos campos).
+**Columnas:** `id`, `symbol_id`, `taken_at`, `cron_run_id`, `target_mean`, `target_median`, `target_high`, `target_low`, `analyst_count`, `recommendation_mean`, `recommendation_key`, `source`.
+**Sirve:** backtest de precisión del consenso (¿predijo el movimiento real?), futura señal de "revisión de analistas" en el Brain.
+
 ### `signals`
 **Para qué:** señales discretas con timestamp inmutable. Auditable.
 **Columnas:** `id`, `symbol_id`, `signal_type` (`fundamental|technical|gex|macro`), `direction` (`long|short|neutral`), `strength` (1-5), `rationale (jsonb)`, `triggered_at`, `expires_at`, `closed_at`, `outcome_return`, `cron_run_id`.
@@ -136,6 +141,12 @@ Diseño de base de datos para las funciones actuales de Wall, optimizado para qu
 ### `fred_observations`
 **Columnas:** `id`, `series_id (FK)`, `obs_date`, `value`, `fetched_at`, `cron_run_id`.
 **Sirve:** `/macro-fx`, ciclos, contexto.
+
+### `macro_indicator_releases`
+**Para qué:** calendario + consenso/actual de releases macro (CPI, GDP, PMI, Unemployment, RetailSales, TradeBalance, InterestRate) por divisa. Upsert por `(currency, indicator, release_date)`, no append-only — un release evoluciona (consensus se conoce antes que actual).
+**Columnas:** `id`, `currency`, `indicator`, `release_date`, `period` (nullable, best-effort), `event_title`, `actual`, `consensus`, `previous_raw`, `source` (`manual|fred|forexfactory`), `updated_at`.
+**Fuente:** `consensus`/`previous_raw` vía cron `macro-calendar` (feed público de ForexFactory, no oficial — ver comentario en la ruta); `actual` vía FRED (solo USD) o entrada manual en `/macro-fx`.
+**Sirve:** `/macro-fx` (reemplaza el localStorage-only anterior), futuro backtest de sorpresa macro vs. movimiento de divisa.
 
 ### `fx_rates`
 **Columnas:** `id`, `base`, `quote`, `rate`, `taken_at`, `cron_run_id`.

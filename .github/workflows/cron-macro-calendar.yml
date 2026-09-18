@@ -1,0 +1,53 @@
+name: Calendario macro ForexFactory (cron diario)
+
+# Sincroniza consensus/previous del calendario económico (CPI, GDP, PMI, etc.)
+# a macro_indicator_releases. Fuente no oficial (ver comentario en
+# app/api/cron/macro-calendar/route.ts) — si falla, el grid manual de
+# /macro-fx sigue funcionando igual, solo sin auto-rellenar esa corrida.
+
+on:
+  schedule:
+    # 06:00 UTC todos los días (01:00 🇪🇨 Quito) — antes de que abran los
+    # mercados de Londres/Frankfurt, para tener el calendario del día listo.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cron-macro-calendar
+  cancel-in-progress: false
+
+jobs:
+  macro-calendar:
+    name: Disparar /api/cron/macro-calendar
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: GET /api/cron/macro-calendar con Bearer
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          ENDPOINT: https://wall-livid.vercel.app/api/cron/macro-calendar
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::CRON_SECRET no está configurado como secret del repo"
+            exit 1
+          fi
+          STATUS=$(curl -sS -X GET "$ENDPOINT" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "User-Agent: github-actions-cron-macro-calendar" \
+            --max-time 60 \
+            -o /tmp/macro_calendar_body.json \
+            -w "%{http_code}")
+          echo "HTTP $STATUS"
+          echo "--- body ---"
+          cat /tmp/macro_calendar_body.json
+          echo
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::cron retornó HTTP $STATUS"
+            exit 1
+          fi
+          if ! grep -q '"ok":true' /tmp/macro_calendar_body.json; then
+            echo "::error::cron respondió 200 pero ok!=true"
+            exit 1
+          fi
+          echo "✓ calendario macro sincronizado"

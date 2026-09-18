@@ -8,6 +8,7 @@ type FredActuals = Partial<Record<Currency, Partial<Record<MacroIndicator, strin
 interface Props {
   inputs: MacroInput
   onChange: (currency: Currency, indicator: MacroIndicator, field: 'actual' | 'consensus', value: string) => void
+  onBlurSave?: (currency: Currency, indicator: MacroIndicator, field: 'actual' | 'consensus') => void
   fredActuals?: FredActuals
 }
 
@@ -37,7 +38,7 @@ const INDICATOR_LABELS: Record<MacroIndicator, string> = {
   InterestRate: 'Rate',
 }
 
-export function MacroInputGrid({ inputs, onChange, fredActuals }: Props) {
+export function MacroInputGrid({ inputs, onChange, onBlurSave, fredActuals }: Props) {
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 overflow-x-auto">
       <div className="flex items-center gap-3 mb-3">
@@ -81,6 +82,7 @@ export function MacroInputGrid({ inputs, onChange, fredActuals }: Props) {
                         type="text"
                         value={cell.actual}
                         onChange={e => onChange(c, ind, 'actual', e.target.value)}
+                        onBlur={() => onBlurSave?.(c, ind, 'actual')}
                         placeholder="—"
                         title={fromFred ? 'Fuente: FRED' : undefined}
                         className={`w-12 bg-gray-800/60 rounded px-1 py-0.5 text-white text-center focus:outline-none ${fromFred ? 'border border-blue-700/60 focus:border-blue-500' : 'border border-gray-700/50 focus:border-gray-500'}`}
@@ -91,6 +93,7 @@ export function MacroInputGrid({ inputs, onChange, fredActuals }: Props) {
                         type="text"
                         value={cell.consensus}
                         onChange={e => onChange(c, ind, 'consensus', e.target.value)}
+                        onBlur={() => onBlurSave?.(c, ind, 'consensus')}
                         placeholder="manual"
                         title="Consensus solo manual — pega el dato de Investing.com / Bloomberg / Forexfactory"
                         className="w-12 bg-gray-800/60 border border-gray-700/50 rounded px-1 py-0.5 text-gray-400 text-center focus:outline-none focus:border-gray-500 placeholder:text-gray-700 placeholder:text-[9px]"
