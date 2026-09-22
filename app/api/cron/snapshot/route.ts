@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
 import { evaluateAndStoreAlerts } from "@/lib/alerts-cron"
+import { notifyTelegram } from "@/lib/telegram"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -216,15 +217,19 @@ export async function GET(req: NextRequest) {
       rowsInserted += alertResult.fired
 
       const alertWebhook = process.env.DISCORD_WEBHOOK_URL
-      if (alertResult.fired > 0 && alertWebhook) {
+      if (alertResult.fired > 0) {
         const today = new Date().toISOString().split("T")[0]
-        fetch(alertWebhook, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: `**Alertas de Oportunidad ${today}** · ${alertResult.fired} disparada(s)\n\n${alertResult.messages.slice(0, 15).join("\n")}`,
-          }),
-        }).catch(() => {})
+        const summary = alertResult.messages.slice(0, 15).join("\n")
+        if (alertWebhook) {
+          fetch(alertWebhook, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: `**Alertas de Oportunidad ${today}** · ${alertResult.fired} disparada(s)\n\n${summary}`,
+            }),
+          }).catch(() => {})
+        }
+        notifyTelegram(`Alertas de Oportunidad ${today} · ${alertResult.fired} disparada(s)\n\n${summary}`)
       }
     } catch (e) {
       errors.push(`alerts: ${(e as Error).message}`)
