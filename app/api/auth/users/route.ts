@@ -43,3 +43,41 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ ok: true, user: data }, { status: 201 });
 }
+
+export async function PATCH(request: NextRequest) {
+  const authHeader = request.headers.get("authorization");
+  const adminSecret = process.env.ADMIN_SECRET;
+
+  if (!adminSecret || authHeader !== `Bearer ${adminSecret}`) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  const { username, password } = await request.json();
+
+  if (!username || !password) {
+    return NextResponse.json({ error: "username y password requeridos" }, { status: 400 });
+  }
+
+  if (password.length < 8) {
+    return NextResponse.json({ error: "La contraseña debe tener al menos 8 caracteres" }, { status: 400 });
+  }
+
+  const password_hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+  const db = supabaseServer();
+  const { data, error } = await db
+    .from("app_users")
+    .update({ password_hash })
+    .eq("username", username)
+    .select("id, username, created_at")
+    .maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ error: "Error al actualizar contraseña" }, { status: 500 });
+  }
+  if (!data) {
+    return NextResponse.json({ error: "El usuario no existe" }, { status: 404 });
+  }
+
+  return NextResponse.json({ ok: true, user: data });
+}

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
 import { evaluateAndStoreAlerts } from "@/lib/alerts-cron"
 import { notifyTelegram } from "@/lib/telegram"
+import { internalAuthHeaders } from "@/lib/api-auth"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -10,10 +11,10 @@ const JOB_NAME = "snapshot_daily"
 
 type FetchResult<T> = { data: T | null; status: number; latencyMs: number; ok: boolean }
 
-async function timedFetch<T>(url: string): Promise<FetchResult<T>> {
+async function timedFetch<T>(url: string, headers: Record<string, string> = {}): Promise<FetchResult<T>> {
   const t0 = Date.now()
   try {
-    const res = await fetch(url, { cache: "no-store" })
+    const res = await fetch(url, { cache: "no-store", headers })
     const latencyMs = Date.now() - t0
     if (!res.ok) return { data: null, status: res.status, latencyMs, ok: false }
     return { data: await res.json() as T, status: res.status, latencyMs, ok: true }
@@ -88,11 +89,15 @@ export async function GET(req: NextRequest) {
   let rowsFailed = 0
   const errors: string[] = []
 
+  // macro/sectors-etf/scanner-pro exigen auth desde f197857. Este endpoint
+  // corre como cron, sin cookie de sesión, así que internalAuthHeaders cae al
+  // Bearer CRON_SECRET (mismo patrón que report/intraday y oportunidades).
+  const authHeaders = await internalAuthHeaders()
   const [macro, sectors, scannerPro] = await Promise.all([
-    timedFetch<{ detection?: { phase?: string; confidence?: number }; vix?: number; vix3m?: number }>(`${base}/api/macro`),
-    timedFetch<unknown>(`${base}/api/sectors-etf`),
+    timedFetch<{ detection?: { phase?: string; confidence?: number }; vix?: number; vix3m?: number }>(`${base}/api/macro`, authHeaders),
+    timedFetch<unknown>(`${base}/api/sectors-etf`, authHeaders),
     timedFetch<{ rows: Array<Record<string, unknown>>; m6Regime?: string; m6Vix?: number }>(
-      `${base}/api/scanner-pro?universe=sp500&limit=100&minBuyScore=0`
+      `${base}/api/scanner-pro?universe=sp500&limit=100&minBuyScore=0`, authHeaders
     ),
   ])
 
