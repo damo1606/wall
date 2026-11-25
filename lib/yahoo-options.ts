@@ -1,4 +1,5 @@
 import { getCrumb } from "./yahoo"
+import { expDateFromTs, nyClock, selectExpirations } from "./option-chains-window"
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -50,10 +51,12 @@ async function fetchRaw(ticker: string, cookie: string, crumb: string, dateTs?: 
  */
 export async function fetchOptionChain(
   ticker: string,
-  opts: { maxExpirations?: number; strikePct?: number } = {},
+  opts: { maxExpirations?: number; strikePct?: number; minDte?: number; today?: string } = {},
 ): Promise<OptionChainResult | null> {
   const maxExp    = opts.maxExpirations ?? 2
   const strikePct = opts.strikePct ?? 0.20
+  const minDte    = opts.minDte ?? 0
+  const today     = opts.today ?? nyClock().date
 
   const auth = await getCrumb()
   if (!auth) return null
@@ -66,7 +69,9 @@ export async function fetchOptionChain(
 
   const expTs: number[] = initial.expirationDates ?? []
   if (expTs.length === 0) return null
-  const selectedTs = expTs.slice(0, maxExp)
+  // minDte=0 conserva el comportamiento previo (los N más próximos).
+  const selectedTs = selectExpirations(expTs, today, maxExp, minDte)
+  if (selectedTs.length === 0) return null
 
   const lo = spot * (1 - strikePct)
   const hi = spot * (1 + strikePct)
@@ -90,11 +95,12 @@ export async function fetchOptionChain(
     }
   }
 
-  // La primera expiración ya vino en `initial`; las demás se piden por date.
-  for (let i = 0; i < selectedTs.length; i++) {
-    const ts = selectedTs[i]
-    const expDate = new Date(ts * 1000).toISOString().slice(0, 10)
-    const result = i === 0 ? initial : await fetchRaw(ticker, auth.cookie, auth.crumb, ts)
+  // `initial` trae la cadena del vencimiento más próximo; se reutiliza solo si
+  // ese vencimiento quedó seleccionado. Los demás se piden por date.
+  const firstTs = Math.min(...expTs)
+  for (const ts of selectedTs) {
+    const expDate = expDateFromTs(ts)
+    const result = ts === firstTs ? initial : await fetchRaw(ticker, auth.cookie, auth.crumb, ts)
     const optData = result?.options?.[0]
     if (!optData) continue
     push(optData.calls, "call", expDate)
