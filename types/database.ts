@@ -1539,6 +1539,51 @@ export type Database = {
           },
         ]
       }
+      option_chain_snapshots: {
+        Row: {
+          contracts: number
+          cron_run_id: string | null
+          quote_ratio: number
+          spot: number
+          symbol_id: string
+          taken_at: string
+          trade_date: string
+        }
+        Insert: {
+          contracts: number
+          cron_run_id?: string | null
+          quote_ratio: number
+          spot: number
+          symbol_id: string
+          taken_at: string
+          trade_date: string
+        }
+        Update: {
+          contracts?: number
+          cron_run_id?: string | null
+          quote_ratio?: number
+          spot?: number
+          symbol_id?: string
+          taken_at?: string
+          trade_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "option_chain_snapshots_cron_run_id_fkey"
+            columns: ["cron_run_id"]
+            isOneToOne: false
+            referencedRelation: "cron_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "option_chain_snapshots_symbol_id_fkey"
+            columns: ["symbol_id"]
+            isOneToOne: false
+            referencedRelation: "symbols"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       option_chains: {
         Row: {
           ask: number | null

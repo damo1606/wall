@@ -1,6 +1,6 @@
 name: Fundamentales + opciones (cron diario)
 
-# Puebla fundamentals_snapshots, income_metrics, company_profile y option_chains.
+# Puebla fundamentals_snapshots, income_metrics y company_profile.
 # Datos que no cambian intradía → 1 corrida al día basta. Separado del snapshot
 # para no concentrar el rate budget de Yahoo.
 
@@ -48,31 +48,6 @@ jobs:
             BATCH_START=$NEXT; sleep 8
           done
 
-  option-chains:
-    name: Loop /api/cron/option-chains
-    needs: fundamentals
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - name: Iterar batches de option chains
-        env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          ENDPOINT:    https://wall-livid.vercel.app/api/cron/option-chains
-          BATCH_SIZE:  '40'
-        run: |
-          set -euo pipefail
-          if [ -z "${CRON_SECRET:-}" ]; then echo "::error::CRON_SECRET no configurado"; exit 1; fi
-          BATCH_START=0; N=0
-          while true; do
-            N=$((N+1))
-            URL="${ENDPOINT}?batch_start=${BATCH_START}&batch_size=${BATCH_SIZE}"
-            STATUS=$(curl -sS -X GET "$URL" -H "Authorization: Bearer $CRON_SECRET" \
-              -H "User-Agent: gha-option-chains" --max-time 320 -o /tmp/o.json -w "%{http_code}")
-            echo "Batch #$N HTTP $STATUS"; cat /tmp/o.json; echo
-            if [ "$STATUS" != "200" ]; then echo "::error::batch #$N falló"; exit 1; fi
-            DONE=$(grep -o '"done":[a-z]*' /tmp/o.json | head -1 | cut -d: -f2)
-            NEXT=$(grep -o '"next_batch_start":[0-9]*' /tmp/o.json | head -1 | cut -d: -f2)
-            if [ "$DONE" = "true" ]; then echo "✓ option chains completas"; break; fi
-            if [ -z "$NEXT" ]; then echo "::warning::sin next; corto"; break; fi
-            BATCH_START=$NEXT; sleep 8
-          done
+# option_chains se movió a cron-option-chains.yml: necesita horario de mercado.
+# Corriendo aquí (03:00 UTC + retraso de GitHub) caía en premercado con
+# bid/ask/OI en 0.
