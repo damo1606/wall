@@ -1,5 +1,6 @@
 import {
   isMarketWindow, nyClock, selectExpirations, quoteRatio, resolveTakenAt, daysBetween,
+  marketWindowStatus, calendarOutdated, NYSE_HOLIDAYS,
 } from "@/lib/option-chains-window"
 
 // Yahoo expresa cada vencimiento como 00:00 UTC de esa fecha.
@@ -32,6 +33,40 @@ describe("isMarketWindow", () => {
   it("rechaza fines de semana", () => {
     expect(isMarketWindow(new Date("2026-11-28T16:00:00Z"))).toBe(false)  // sábado
     expect(isMarketWindow(new Date("2026-11-29T16:00:00Z"))).toBe(false)  // domingo
+  })
+})
+
+describe("calendario NYSE", () => {
+  it("Thanksgiving 2026 (jueves 26) es feriado aunque sea día hábil y esté en horario", () => {
+    expect(marketWindowStatus(new Date("2026-11-26T18:56:00Z"))).toEqual({ open: false, reason: "holiday" })
+  })
+  it("el viernes 27 es medio día: abierto a las 12:30 ET, cerrado desde las 13:00 ET", () => {
+    expect(marketWindowStatus(new Date("2026-11-27T17:30:00Z"))).toEqual({ open: true, closeMin: 13 * 60 })
+    expect(marketWindowStatus(new Date("2026-11-27T18:00:00Z"))).toEqual({ open: false, reason: "outside_hours" })
+  })
+  it("un día normal cierra a las 16:00 ET", () => {
+    expect(marketWindowStatus(new Date("2026-11-25T20:30:00Z"))).toEqual({ open: true, closeMin: 16 * 60 })
+  })
+  it("Navidad 2026 y el 24 de diciembre de 2027 (feriado observado) están cerrados", () => {
+    expect(isMarketWindow(new Date("2026-12-25T16:00:00Z"))).toBe(false)
+    expect(isMarketWindow(new Date("2027-12-24T16:00:00Z"))).toBe(false)
+  })
+  it("distingue fin de semana de feriado", () => {
+    expect(marketWindowStatus(new Date("2026-11-28T16:00:00Z"))).toEqual({ open: false, reason: "weekend" })
+  })
+  it("todos los feriados cargados caen en lunes a viernes", () => {
+    for (const d of NYSE_HOLIDAYS) {
+      const wd = new Date(`${d}T12:00:00Z`).getUTCDay()
+      expect([d, wd >= 1 && wd <= 5]).toEqual([d, true])
+    }
+  })
+  it("avisa cuando el año no está en el calendario", () => {
+    expect(calendarOutdated(new Date("2028-06-01T16:00:00Z"))).toBe(false)
+    expect(calendarOutdated(new Date("2029-01-03T16:00:00Z"))).toBe(true)
+  })
+  it("2028: el 3 de julio es medio día y el 1 de enero (sábado) no tiene feriado observado", () => {
+    expect(marketWindowStatus(new Date("2028-07-03T16:00:00Z"))).toEqual({ open: true, closeMin: 13 * 60 })
+    expect(NYSE_HOLIDAYS.has("2027-12-31")).toBe(false)
   })
 })
 

@@ -5,7 +5,8 @@ name: Option chains (horario de mercado)
 # Debe correr con el mercado abierto: fuera de horario Yahoo devuelve
 # bid/ask/OI en 0 y la IV sin sentido. GitHub retrasa los schedules entre
 # 40 min y varias horas, así que hay 4 disparos repartidos en la sesión:
-# el endpoint solo acepta lun-vie 09:45-16:00 ET y es idempotente por
+# el endpoint solo acepta días hábiles NYSE de 09:45 al cierre (16:00 ET,
+# 13:00 ET en medio día; feriados excluidos) y es idempotente por
 # (símbolo, día NY) — el primero que cae en la ventana toma la foto, los
 # siguientes solo reintentan los símbolos que fallaron.
 #
@@ -60,8 +61,9 @@ jobs:
               -H "User-Agent: gha-option-chains" --max-time 320 -o /tmp/o.json -w "%{http_code}")
             echo "Batch #$N HTTP $STATUS"; cat /tmp/o.json; echo
             if [ "$STATUS" != "200" ]; then echo "::error::batch #$N falló"; exit 1; fi
-            if grep -q '"skipped":"outside_market_hours"' /tmp/o.json; then
-              echo "::notice::fuera de horario de mercado — no se toma la cadena"; break
+            SKIPPED=$(grep -o '"skipped":"[a-z_]*"' /tmp/o.json | head -1 | cut -d'"' -f4 || true)
+            if [ -n "$SKIPPED" ]; then
+              echo "::notice::mercado cerrado ($SKIPPED) — no se toma la cadena"; break
             fi
             DONE=$(grep -o '"done":[a-z]*' /tmp/o.json | head -1 | cut -d: -f2)
             NEXT=$(grep -o '"next_batch_start":[0-9]*' /tmp/o.json | head -1 | cut -d: -f2)

@@ -3,7 +3,7 @@ import { supabaseServer, type TypedClient } from "@/lib/supabase"
 import { fetchOptionChain } from "@/lib/yahoo-options"
 import { intParam } from "@/lib/query-params"
 import {
-  isMarketWindow, nyClock, quoteRatio, resolveTakenAt, MIN_DTE, MIN_QUOTE_RATIO,
+  calendarOutdated, marketWindowStatus, nyClock, quoteRatio, resolveTakenAt, MIN_DTE, MIN_QUOTE_RATIO,
 } from "@/lib/option-chains-window"
 
 export const dynamic = "force-dynamic"
@@ -34,10 +34,12 @@ async function pool<T, R>(items: T[], concurrency: number, fn: (item: T) => Prom
  * Toma diaria de cadenas de opciones (Yahoo) para los símbolos líquidos.
  *
  * Reglas (ver lib/option-chains-window.ts):
- *  - Solo corre en horario de mercado (lun-vie 09:45-16:00 ET). Fuera de esa
- *    ventana responde 200 con skipped y no escribe nada: Yahoo devuelve
- *    bid/ask/OI en 0 de madrugada. `force=1` salta la ventana (pruebas), pero
- *    no el control de calidad.
+ *  - Solo corre en horario de mercado: día hábil NYSE, de 09:45 al cierre
+ *    (16:00 ET, 13:00 ET en medio día). Fuera de esa ventana responde 200 con
+ *    skipped = weekend | holiday | outside_hours y no escribe nada. En
+ *    feriado Yahoo deja congeladas las quotes del último cierre, por eso el
+ *    calendario es necesario. `force=1` salta la ventana (pruebas), pero no el
+ *    control de calidad.
  *  - Idempotente por (símbolo, día NY) vía la PK de option_chain_snapshots:
  *    varias corridas el mismo día no duplican; un símbolo que falló en la
  *    primera se reintenta en la siguiente.
@@ -57,11 +59,15 @@ export async function GET(req: NextRequest) {
   const batchSize  = intParam(url.searchParams.get("batch_size"), { def: 40, min: 1, max: 100 })
   const force      = url.searchParams.get("force") === "1"
 
-  const now = new Date()
-  const ny  = nyClock(now)
-  if (!force && !isMarketWindow(now)) {
+  const now    = new Date()
+  const ny     = nyClock(now)
+  const window = marketWindowStatus(now)
+  if (calendarOutdated(now)) {
+    console.warn(`[option-chains] calendario NYSE sin datos para ${ny.date.slice(0, 4)}: actualizar lib/option-chains-window.ts`)
+  }
+  if (!force && !window.open) {
     return NextResponse.json({
-      ok: true, skipped: "outside_market_hours", done: true,
+      ok: true, skipped: window.reason, done: true,
       ny_date: ny.date, ny_time: `${String(Math.floor(ny.minutes / 60)).padStart(2, "0")}:${String(ny.minutes % 60).padStart(2, "0")}`,
     })
   }
