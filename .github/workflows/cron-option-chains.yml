@@ -1,27 +1,17 @@
-name: Option chains (horario de mercado)
+name: Option chains (disparo manual)
 
-# Toma diaria de cadenas de opciones para los símbolos líquidos.
+# Disparo MANUAL por lotes de la toma de cadenas de opciones.
 #
-# Debe correr con el mercado abierto: fuera de horario Yahoo devuelve
-# bid/ask/OI en 0 y la IV sin sentido. GitHub retrasa los schedules entre
-# 40 min y varias horas, así que hay 4 disparos repartidos en la sesión:
-# el endpoint solo acepta días hábiles NYSE de 09:45 al cierre (16:00 ET,
+# El disparo diario lo hace Vercel Cron (vercel.json: 15:00, 16:00 y 17:00
+# UTC, lun-vie, ±59 min). Los schedules de GitHub se quitaron: llegaban con
+# 5-10 h de retraso y caían siempre con el mercado cerrado.
+#
+# El endpoint solo acepta días hábiles NYSE de 09:45 al cierre (16:00 ET,
 # 13:00 ET en medio día; feriados excluidos) y es idempotente por
-# (símbolo, día NY) — el primero que cae en la ventana toma la foto, los
-# siguientes solo reintentan los símbolos que fallaron.
-#
-# Horarios (UTC → ET invierno / ET verano):
-#   14:00 → 09:00 / 10:00
-#   15:30 → 10:30 / 11:30
-#   17:00 → 12:00 / 13:00
-#   18:30 → 13:30 / 14:30
+# (símbolo, día NY): lanzar esto a mano después de un cron solo reintenta
+# los símbolos que falten.
 
 on:
-  schedule:
-    - cron: '0 14 * * 1-5'
-    - cron: '30 15 * * 1-5'
-    - cron: '0 17 * * 1-5'
-    - cron: '30 18 * * 1-5'
   workflow_dispatch:
     inputs:
       force:
