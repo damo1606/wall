@@ -13,6 +13,9 @@ const JOB_NAME = "option_chains_daily"
 const RATE_LIMIT_MS = 3000
 const CONCURRENCY = 3
 const MIN_DOLLAR_VOLUME = 5_000_000   // misma regla de elegibilidad
+// Margen bajo maxDuration (300 s): pasado este tiempo no se empiezan símbolos
+// nuevos; los que estén en curso terminan (~5-15 s cada uno).
+const TIME_BUDGET_MS = 240_000
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
@@ -43,8 +46,11 @@ async function pool<T, R>(items: T[], concurrency: number, fn: (item: T) => Prom
  *  - Idempotente por (símbolo, día NY) vía la PK de option_chain_snapshots:
  *    varias corridas el mismo día no duplican; un símbolo que falló en la
  *    primera se reintenta en la siguiente.
+ *  - Disparo: Vercel Cron (vercel.json) llama sin parámetros = corrida
+ *    completa con presupuesto de 240 s; tres crons diarios retoman lo que
+ *    falte. El workflow de GitHub queda solo para disparo manual por lotes.
  *  - Un único taken_at por corrida (param `taken_at` que pasa el workflow a
- *    todos los lotes).
+ *    todos los lotes; en corrida completa es la hora de inicio).
  *  - Descarta vencimientos 0DTE/1DTE y tomas con quote_ratio < 0.5.
  */
 export async function GET(req: NextRequest) {
@@ -55,6 +61,10 @@ export async function GET(req: NextRequest) {
   }
 
   const url        = new URL(req.url)
+  // Sin batch_start = corrida completa (la que dispara Vercel Cron): recorre
+  // todos los símbolos pendientes hasta agotar el presupuesto de tiempo. Lo
+  // que no alcance lo retoma el siguiente cron del día (idempotente).
+  const fullRun    = !url.searchParams.has("batch_start")
   const batchStart = intParam(url.searchParams.get("batch_start"), { def: 0, min: 0 })
   const batchSize  = intParam(url.searchParams.get("batch_size"), { def: 40, min: 1, max: 100 })
   const force      = url.searchParams.get("force") === "1"
@@ -85,12 +95,14 @@ export async function GET(req: NextRequest) {
   const runId = runRow.id
 
   // Solo símbolos elegibles: liquidez >= $5M (regla de negocio)
-  const { data: liquid, error: liqErr } = await db
+  const liquidQuery = db
     .from("price_summary_daily")
     .select("symbol_id")
     .gte("dollar_volume_20d", MIN_DOLLAR_VOLUME)
     .order("symbol_id")
-    .range(batchStart, batchStart + batchSize - 1)
+  const { data: liquid, error: liqErr } = fullRun
+    ? await liquidQuery
+    : await liquidQuery.range(batchStart, batchStart + batchSize - 1)
   if (liqErr || !liquid) {
     await db.from("cron_runs").update({
       finished_at: new Date().toISOString(), status: "failed",
@@ -107,10 +119,14 @@ export async function GET(req: NextRequest) {
   }
 
   // Resolver tickers y saltar los que ya tienen toma válida hoy
+  // En corrida completa no se filtra por id: con ~185 uuids el `in()` haría
+  // una URL demasiado larga para PostgREST. Ambas tablas son chicas.
   const symbolIds = liquid.map(l => l.symbol_id)
+  const symQuery  = db.from("symbols").select("id, ticker")
+  const doneQuery = db.from("option_chain_snapshots").select("symbol_id").eq("trade_date", tradeDate)
   const [{ data: symRows }, { data: doneRows, error: doneErr }] = await Promise.all([
-    db.from("symbols").select("id, ticker").in("id", symbolIds),
-    db.from("option_chain_snapshots").select("symbol_id").eq("trade_date", tradeDate).in("symbol_id", symbolIds),
+    fullRun ? symQuery : symQuery.in("id", symbolIds),
+    fullRun ? doneQuery : doneQuery.in("symbol_id", symbolIds),
   ])
   if (doneErr) {
     await db.from("cron_runs").update({
@@ -123,10 +139,13 @@ export async function GET(req: NextRequest) {
   const alreadyDone = new Set((doneRows ?? []).map(r => r.symbol_id))
   const pending     = liquid.filter(l => !alreadyDone.has(l.symbol_id))
 
-  let rowsInserted = 0, tickersOk = 0, tickersFail = 0, tickersDup = 0
+  let rowsInserted = 0, tickersOk = 0, tickersFail = 0, tickersDup = 0, tickersDeferred = 0
   const failed: string[] = [], rejected: string[] = []
+  const deadline = startedAt + TIME_BUDGET_MS
 
   await pool(pending, CONCURRENCY, async (l) => {
+    // No empezar símbolos nuevos cerca del límite de la función.
+    if (Date.now() > deadline) { tickersDeferred++; return }
     const ticker = tickerById.get(l.symbol_id)
     if (!ticker) { tickersFail++; failed.push(`sin-ticker:${l.symbol_id.slice(0, 8)}`); return }
     const chain = await fetchOptionChain(ticker, {
@@ -171,11 +190,13 @@ export async function GET(req: NextRequest) {
 
   const durationMs = Date.now() - startedAt
   const status: "success" | "partial" | "failed" =
-    tickersFail === 0 ? "success" : (tickersOk > 0 || tickersDup > 0 || alreadyDone.size > 0 ? "partial" : "failed")
+    tickersFail === 0 && tickersDeferred === 0 ? "success"
+    : (tickersOk > 0 || tickersDup > 0 || alreadyDone.size > 0 ? "partial" : "failed")
 
   const issues = [
     failed.length   ? `fallidos: ${failed.slice(0, 5).join(", ")}` : "",
     rejected.length ? `sin quotes: ${rejected.slice(0, 5).join(", ")}` : "",
+    tickersDeferred ? `${tickersDeferred} pendientes por tiempo` : "",
   ].filter(Boolean).join(" · ")
 
   await db.from("cron_runs").update({
@@ -184,13 +205,14 @@ export async function GET(req: NextRequest) {
     error_summary: issues ? `${tickersFail} con problema — ${issues}` : null,
   }).eq("id", runId)
 
-  const done = liquid.length < batchSize
+  const done = fullRun ? true : liquid.length < batchSize
   return NextResponse.json({
-    ok: status !== "failed", runId, status,
+    ok: status !== "failed", runId, status, mode: fullRun ? "full" : "batch",
     trade_date: tradeDate, taken_at: takenAt,
-    batch_start: batchStart, batch_size: batchSize,
+    batch_start: fullRun ? null : batchStart, batch_size: fullRun ? null : batchSize,
     tickers_processed: liquid.length, tickers_already_done: alreadyDone.size + tickersDup,
     tickers_ok: tickersOk, tickers_failed: failed.length, tickers_rejected_quality: rejected.length,
+    tickers_deferred: tickersDeferred,
     rows_inserted: rowsInserted, duration_ms: durationMs,
     next_batch_start: done ? null : batchStart + batchSize, done,
   })
