@@ -40,8 +40,8 @@ export default function LoginPage() {
     <div className="min-h-screen bg-bg flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="text-accent font-bold text-3xl tracking-[0.3em] mb-1">SORE</div>
-          <div className="text-muted text-xs tracking-widest">INSTITUTIONAL OPTIONS FLOW</div>
+          <div className="text-accent font-bold text-3xl tracking-[0.3em] mb-1">WALL</div>
+          <div className="text-muted text-xs tracking-widest">ANÁLISIS DE MERCADOS</div>
         </div>
 
         <form onSubmit={handleSubmit} className="border border-border bg-surface p-8 flex flex-col gap-5">
