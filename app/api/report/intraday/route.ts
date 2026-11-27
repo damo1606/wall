@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseServer, type TypedClient } from "@/lib/supabase"
 import { internalAuthHeaders } from "@/lib/api-auth"
+import { CSS_GO, DSS_MIN_GO } from "@/lib/sore"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 300
@@ -113,6 +114,7 @@ export async function GET(req: NextRequest) {
   const topConv = [...rows].sort((a, b) => b.convictionScore - a.convictionScore).slice(0, 5)
   const topBuy  = [...rows].sort((a, b) => b.buyScore - a.buyScore).slice(0, 3)
   const goSore  = rows.filter(r => r.soreGate === "GO").slice(0, 5)
+  const topWait = rows.filter(r => r.soreGate === "WAIT").sort((a, b) => b.soreCSS - a.soreCSS).slice(0, 3)
   const verdicts = rows.reduce<Record<string, number>>((a, r) => { a[r.verdict] = (a[r.verdict] || 0) + 1; return a }, {})
   const sores    = rows.reduce<Record<string, number>>((a, r) => { a[r.soreGate] = (a[r.soreGate] || 0) + 1; return a }, {})
 
@@ -141,9 +143,20 @@ export async function GET(req: NextRequest) {
     ? "<i>scanner-pro no devolvió datos</i>"
     : `<pre>${topBuy.map(fmtBuyRow).join("\n")}</pre>`
 
-  const goSoreBlock = goSore.length
-    ? goSore.map(r => `<code>${esc(r.symbol)}</code> CSS=${r.soreCSS} → ${esc(r.soreStrategy)}`).join("\n")
-    : "<i>sin oportunidades (régimen no favorable)</i>"
+  // Sin GO es lo habitual: el umbral (CSS y DSS) casi nunca se alcanza, no es
+  // un problema de régimen. Mostramos los WAIT más cercanos como referencia.
+  const fmtWaitRow = (r: ScannerRow) =>
+    `<code>${esc(r.symbol.padEnd(5))}</code> CSS=${r.soreCSS.toFixed(0)} DSS=${r.soreDSS.toFixed(0)} → ${esc(r.soreStrategy)}`
+  const goSoreBlock = rows.length === 0
+    ? "<i>scanner-pro no devolvió datos</i>"
+    : goSore.length
+      ? goSore.map(r => `<code>${esc(r.symbol)}</code> CSS=${r.soreCSS} → ${esc(r.soreStrategy)}`).join("\n")
+      : [
+          `<i>ningún ticker cumple CSS≥${CSS_GO} y DSS≥${DSS_MIN_GO}</i>`,
+          ...(topWait.length
+            ? [`Mejores WAIT (solo referencia, no operar):`, ...topWait.map(fmtWaitRow)]
+            : [`<i>sin WAIT: todo en AVOID</i>`]),
+        ].join("\n")
 
   const triggersBlock = `OPEN ahora: <b>${openNow}</b> · abiertas hoy: <b>${openedToday}</b> · cerradas hoy: <b>${closedToday}</b>`
 
