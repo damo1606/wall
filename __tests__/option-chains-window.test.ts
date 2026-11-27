@@ -61,8 +61,12 @@ describe("calendario NYSE", () => {
     }
   })
   it("avisa cuando el año no está en el calendario", () => {
-    expect(calendarOutdated(new Date("2027-06-01T16:00:00Z"))).toBe(false)
-    expect(calendarOutdated(new Date("2028-01-03T16:00:00Z"))).toBe(true)
+    expect(calendarOutdated(new Date("2028-06-01T16:00:00Z"))).toBe(false)
+    expect(calendarOutdated(new Date("2029-01-03T16:00:00Z"))).toBe(true)
+  })
+  it("2028: el 3 de julio es medio día y el 1 de enero (sábado) no tiene feriado observado", () => {
+    expect(marketWindowStatus(new Date("2028-07-03T16:00:00Z"))).toEqual({ open: true, closeMin: 13 * 60 })
+    expect(NYSE_HOLIDAYS.has("2027-12-31")).toBe(false)
   })
 })
 
